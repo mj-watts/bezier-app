@@ -1,5 +1,29 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, Expand, MousePointer2, PenTool, Plus, Redo2, Trash2, Undo2 } from 'lucide-react';
+import {
+  Circle,
+  Copy,
+  Diamond,
+  Expand,
+  MousePointer2,
+  PaintBucket,
+  PenLine,
+  PenTool,
+  Redo2,
+  SquareDashed,
+  Shapes,
+  Square,
+  Trash2,
+  Triangle,
+  Undo2,
+  GripVertical,
+  X,
+  WandSparkles,
+  Merge,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
+import MuiSlider from '@mui/material/Slider';
+import { HexAlphaColorPicker } from 'react-colorful';
 
 type Vec = { x: number; y: number };
 
@@ -14,12 +38,19 @@ type PathShape = {
   id: string;
   name: string;
   points: Point[];
+  uiRotation: number;
+  svgId: string;
+  svgClass: string;
+  sourceD: string | null;
+  geometryDirty: boolean;
   fill: string;
   stroke: string;
   strokeWidth: number;
+  opacity: number;
   fillExplicit: boolean;
   strokeExplicit: boolean;
   strokeWidthExplicit: boolean;
+  opacityExplicit: boolean;
   closed: boolean;
 };
 
@@ -42,6 +73,8 @@ type DragTarget =
       kind: 'scale';
       pathIndex: number;
       affectAll: boolean;
+      targetPathIndices: number[];
+      axis: 'both' | 'x' | 'y';
       originOpp: Vec;
       originCenter: Vec;
       startVecOpp: Vec;
@@ -52,7 +85,17 @@ type DragTarget =
       kind: 'move';
       pathIndex: number;
       affectAll: boolean;
+      targetPathIndices: number[];
       startPos: Vec;
+      baseShapes: PathShape[];
+    }
+  | {
+      kind: 'rotate';
+      pathIndex: number;
+      affectAll: boolean;
+      targetPathIndices: number[];
+      originCenter: Vec;
+      startAngle: number;
       baseShapes: PathShape[];
     }
   | {
@@ -68,6 +111,18 @@ type PenHover =
   | null;
 
 type ViewBox = { minX: number; minY: number; vbW: number; vbH: number };
+type ShapePreset = 'circle' | 'roundedSquare' | 'roundedDiamond' | 'roundedTriangle';
+type StylePanel = 'fill' | 'stroke' | 'opacity';
+type SliderInlineProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  unit?: string;
+  disabled?: boolean;
+  onChange: (next: number) => void;
+};
 
 const width = 900;
 const height = 560;
@@ -78,8 +133,100 @@ const ZOOM_RECENTER_BLEND = 0.32;
 const MERGE_MAX_STEP_DISTANCE = 18;
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
+const clamp255 = (n: number) => clamp(Math.round(n), 0, 255);
 const uid = () => Math.random().toString(36).slice(2, 9);
 const INTERNAL_VIEWBOX: ViewBox = { minX: 0, minY: 0, vbW: width, vbH: height };
+type Rgba = { r: number; g: number; b: number; a: number };
+
+const parseHexColor = (s: string): Rgba | null => {
+  const hex = s.trim().toLowerCase();
+  if (!hex.startsWith('#')) return null;
+  const raw = hex.slice(1);
+  if (![3, 4, 6, 8].includes(raw.length)) return null;
+  const expand = (v: string) => (v.length === 1 ? `${v}${v}` : v);
+  if (raw.length === 3 || raw.length === 4) {
+    const r = Number.parseInt(expand(raw[0]), 16);
+    const g = Number.parseInt(expand(raw[1]), 16);
+    const b = Number.parseInt(expand(raw[2]), 16);
+    const a = raw.length === 4 ? Number.parseInt(expand(raw[3]), 16) / 255 : 1;
+    return { r, g, b, a };
+  }
+  const r = Number.parseInt(raw.slice(0, 2), 16);
+  const g = Number.parseInt(raw.slice(2, 4), 16);
+  const b = Number.parseInt(raw.slice(4, 6), 16);
+  const a = raw.length === 8 ? Number.parseInt(raw.slice(6, 8), 16) / 255 : 1;
+  return { r, g, b, a };
+};
+
+const parseRgbColor = (s: string): Rgba | null => {
+  const m = s
+    .trim()
+    .match(/^rgba?\(\s*(-?(?:\d+\.?\d*|\.\d+))\s*,\s*(-?(?:\d+\.?\d*|\.\d+))\s*,\s*(-?(?:\d+\.?\d*|\.\d+))(?:\s*,\s*(-?(?:\d+\.?\d*|\.\d+))\s*)?\)$/i);
+  if (!m) return null;
+  const r = clamp255(Number(m[1]));
+  const g = clamp255(Number(m[2]));
+  const b = clamp255(Number(m[3]));
+  const a = m[4] === undefined ? 1 : clamp(Number(m[4]), 0, 1);
+  return { r, g, b, a };
+};
+
+const parseColorToRgba = (s: string, fallback: Rgba): Rgba => parseHexColor(s) ?? parseRgbColor(s) ?? fallback;
+
+const rgbaToHexAlpha = ({ r, g, b, a }: Rgba) =>
+  `#${clamp255(r).toString(16).padStart(2, '0')}${clamp255(g).toString(16).padStart(2, '0')}${clamp255(b).toString(16).padStart(2, '0')}${clamp255(
+    a * 255,
+  )
+    .toString(16)
+    .padStart(2, '0')}`;
+
+const rgbaToCss = ({ r, g, b, a }: Rgba) =>
+  `rgba(${clamp255(r)}, ${clamp255(g)}, ${clamp255(b)}, ${Number(clamp(a, 0, 1).toFixed(3))})`;
+
+const SliderInline = ({ label, value, min, max, step = 1, unit = '', disabled, onChange }: SliderInlineProps) => {
+  const safe = clamp(value, min, max);
+  return (
+    <div className={`slider-inline${disabled ? ' disabled' : ''}`}>
+      <span className="slider-inline-label">{label}:</span>
+      <MuiSlider
+        min={min}
+        max={max}
+        step={step}
+        value={safe}
+        disabled={disabled}
+        onChange={(_, v: number | number[]) => onChange(Array.isArray(v) ? Number(v[0]) : Number(v))}
+        size="small"
+        sx={{
+          color: '#ff9a00',
+          height: 4,
+          '& .MuiSlider-track': { border: 'none' },
+          '& .MuiSlider-rail': { backgroundColor: '#344152', opacity: 1 },
+          '& .MuiSlider-thumb': {
+            width: 14,
+            height: 14,
+            backgroundColor: '#ff9a00',
+            border: '2px solid #ffe1b0',
+            boxShadow: '0 0 0 1px rgba(255,154,0,0.35)',
+          },
+        }}
+      />
+      <input
+        className="slider-inline-input"
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={safe}
+        disabled={disabled}
+        onChange={(e) => {
+          const next = Number(e.target.value);
+          if (!Number.isFinite(next)) return;
+          onChange(clamp(next, min, max));
+        }}
+      />
+      {unit ? <span className="slider-inline-unit">{unit}</span> : null}
+    </div>
+  );
+};
 
 const makePoint = (x: number, y: number): Point => ({
   id: uid(),
@@ -88,27 +235,107 @@ const makePoint = (x: number, y: number): Point => ({
   out: { x: x + 40, y },
 });
 
-const defaultPath = (name: string): PathShape => ({
-  id: uid(),
-  name,
-  points: [
-    makePoint(170, 280),
-    makePoint(300, 140),
-    makePoint(520, 160),
-    makePoint(700, 320),
-    makePoint(500, 430),
-    makePoint(260, 390),
-  ],
-  fill: '#58a6ff55',
-  stroke: '#79c0ff',
-  strokeWidth: 3,
-  fillExplicit: true,
-  strokeExplicit: true,
-  strokeWidthExplicit: true,
-  closed: true,
-});
+const createCurvedPolygonPoints = (cx: number, cy: number, radius: number, sides: number, rotation: number, roundness: number) => {
+  const anchors: Vec[] = Array.from({ length: sides }, (_, i) => {
+    const a = rotation + (Math.PI * 2 * i) / sides;
+    return { x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * radius };
+  });
+  const points: Point[] = [];
+
+  for (let i = 0; i < sides; i += 1) {
+    const prev = anchors[(i - 1 + sides) % sides];
+    const curr = anchors[i];
+    const next = anchors[(i + 1) % sides];
+    const tx = next.x - prev.x;
+    const ty = next.y - prev.y;
+    const tLen = Math.hypot(tx, ty) || 1;
+    const ux = tx / tLen;
+    const uy = ty / tLen;
+    const dPrev = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+    const dNext = Math.hypot(next.x - curr.x, next.y - curr.y);
+    const h = Math.min(dPrev, dNext) * roundness;
+    points.push({
+      id: uid(),
+      p: { x: curr.x, y: curr.y },
+      in: { x: curr.x - ux * h, y: curr.y - uy * h },
+      out: { x: curr.x + ux * h, y: curr.y + uy * h },
+    });
+  }
+
+  return points;
+};
+
+const createCirclePoints = (cx: number, cy: number, radius: number) => {
+  const k = 0.5522847498;
+  const rk = radius * k;
+  return [
+    {
+      id: uid(),
+      p: { x: cx, y: cy - radius },
+      in: { x: cx - rk, y: cy - radius },
+      out: { x: cx + rk, y: cy - radius },
+    },
+    {
+      id: uid(),
+      p: { x: cx + radius, y: cy },
+      in: { x: cx + radius, y: cy - rk },
+      out: { x: cx + radius, y: cy + rk },
+    },
+    {
+      id: uid(),
+      p: { x: cx, y: cy + radius },
+      in: { x: cx + rk, y: cy + radius },
+      out: { x: cx - rk, y: cy + radius },
+    },
+    {
+      id: uid(),
+      p: { x: cx - radius, y: cy },
+      in: { x: cx - radius, y: cy + rk },
+      out: { x: cx - radius, y: cy - rk },
+    },
+  ] satisfies Point[];
+};
+
+const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: number): PathShape => {
+  const radius = 90;
+  const points =
+    preset === 'circle'
+      ? createCirclePoints(cx, cy, radius)
+      : preset === 'roundedSquare'
+        ? createCurvedPolygonPoints(cx, cy, radius, 4, -Math.PI / 4, 0.14)
+        : preset === 'roundedDiamond'
+          ? createCurvedPolygonPoints(cx, cy, radius, 4, 0, 0.12)
+          : createCurvedPolygonPoints(cx, cy, radius, 3, -Math.PI / 2, 0.16);
+
+  return {
+    id: uid(),
+    name,
+    points,
+    uiRotation: 0,
+    svgId: '',
+    svgClass: '',
+    sourceD: null,
+    geometryDirty: true,
+    fill: '#58a6ff55',
+    stroke: '#79c0ff',
+    strokeWidth: 3,
+    opacity: 1,
+    fillExplicit: true,
+    strokeExplicit: true,
+    strokeWidthExplicit: true,
+    opacityExplicit: false,
+    closed: true,
+  };
+};
 
 const mirrorHandle = (anchor: Vec, handle: Vec): Vec => ({ x: anchor.x * 2 - handle.x, y: anchor.y * 2 - handle.y });
+const rotateAround = (p: Vec, c: Vec, ang: number): Vec => {
+  const dx = p.x - c.x;
+  const dy = p.y - c.y;
+  const cos = Math.cos(ang);
+  const sin = Math.sin(ang);
+  return { x: c.x + dx * cos - dy * sin, y: c.y + dx * sin + dy * cos };
+};
 
 const sampleBezier = (a: Vec, c1: Vec, c2: Vec, b: Vec, t: number): Vec => {
   const mt = 1 - t;
@@ -312,16 +539,21 @@ const mapShapesToViewBox = (shapes: PathShape[], vb: ViewBox) =>
   }));
 
 const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const exportShapes = mapShapesToViewBox(shapes, vb);
   const lines = shapes
     .map((shape, i) => {
       const exportShape = exportShapes[i];
       if (!exportShape) return '';
-      const d = pathData(exportShape.points, exportShape.closed);
+      const d = !shape.geometryDirty && shape.sourceD ? shape.sourceD : pathData(exportShape.points, exportShape.closed);
       const attrs: string[] = [`d="${d}"`];
+      if (shape.svgId.trim()) attrs.push(`id="${esc(shape.svgId.trim())}"`);
+      if (shape.svgClass.trim()) attrs.push(`class="${esc(shape.svgClass.trim())}"`);
       if (shape.fillExplicit) attrs.push(`fill="${shape.fill}"`);
-      if (shape.strokeExplicit) attrs.push(`stroke="${shape.stroke}"`);
-      if (shape.strokeWidthExplicit) attrs.push(`stroke-width="${shape.strokeWidth}"`);
+      if (shape.opacityExplicit) attrs.push(`opacity="${Number(shape.opacity.toFixed(4))}"`);
+      const shouldExportStroke = shape.strokeWidth > 0;
+      if (shouldExportStroke && shape.strokeExplicit) attrs.push(`stroke="${shape.stroke}"`);
+      if (shouldExportStroke && shape.strokeWidthExplicit) attrs.push(`stroke-width="${shape.strokeWidth}"`);
       return `  <path ${attrs.join(' ')} />`;
     })
     .filter(Boolean)
@@ -518,6 +750,10 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
     const stroke = attr(p, 'stroke') ?? '#000000';
     const swAttr = attr(p, 'stroke-width');
     const sw = Number(swAttr ?? '1');
+    const opacityAttr = attr(p, 'opacity');
+    const opacity = clamp(Number(opacityAttr ?? '1'), 0, 1);
+    const svgId = attr(p, 'id') ?? '';
+    const svgClass = attr(p, 'class') ?? '';
     const fillExplicit = attr(p, 'fill') !== null;
     const strokeExplicit = attr(p, 'stroke') !== null;
     const strokeWidthExplicit = swAttr !== null;
@@ -526,13 +762,20 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
       id: uid(),
       name: `Path ${k + 1}`,
       points: parsed.points,
+      uiRotation: 0,
+      svgId,
+      svgClass,
+      sourceD: d,
+      geometryDirty: false,
       closed: parsed.closed,
       fill: fillExplicit ? fill : '#000000',
       stroke,
       strokeWidth: Number.isFinite(sw) ? sw : 3,
+      opacity: Number.isFinite(opacity) ? opacity : 1,
       fillExplicit,
       strokeExplicit,
       strokeWidthExplicit,
+      opacityExplicit: opacityAttr !== null,
     });
   }
 
@@ -546,7 +789,91 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');
 
-const highlightSelectedPathHtml = (code: string, selectedPath: number) => {
+const getSelectedAnchorRangesInD = (d: string, selectedPoints: number[]) => {
+  const selected = new Set(selectedPoints);
+  const tokens: Array<{ text: string; index: number; cmd: boolean }> = [];
+  const re = /[MLCZmlcz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(d))) {
+    const text = m[0];
+    const index = m.index;
+    tokens.push({ text, index, cmd: /^[MLCZmlcz]$/.test(text) });
+  }
+
+  const out: Array<{ start: number; end: number }> = [];
+  let i = 0;
+  let cmd = '';
+  let pointIndex = -1;
+
+  const isNum = (k: number) => k < tokens.length && !tokens[k].cmd;
+
+  while (i < tokens.length) {
+    if (tokens[i].cmd) {
+      cmd = tokens[i].text.toUpperCase();
+      i += 1;
+      continue;
+    }
+    if (!cmd) break;
+
+    if (cmd === 'M') {
+      if (!(isNum(i) && isNum(i + 1))) break;
+      pointIndex += 1;
+      if (selected.has(pointIndex)) {
+        out.push({ start: tokens[i].index, end: tokens[i].index + tokens[i].text.length });
+        out.push({ start: tokens[i + 1].index, end: tokens[i + 1].index + tokens[i + 1].text.length });
+      }
+      i += 2;
+      cmd = 'L';
+      continue;
+    }
+
+    if (cmd === 'L') {
+      if (!(isNum(i) && isNum(i + 1))) break;
+      pointIndex += 1;
+      if (selected.has(pointIndex)) {
+        out.push({ start: tokens[i].index, end: tokens[i].index + tokens[i].text.length });
+        out.push({ start: tokens[i + 1].index, end: tokens[i + 1].index + tokens[i + 1].text.length });
+      }
+      i += 2;
+      continue;
+    }
+
+    if (cmd === 'C') {
+      if (!(isNum(i) && isNum(i + 1) && isNum(i + 2) && isNum(i + 3) && isNum(i + 4) && isNum(i + 5))) break;
+      pointIndex += 1;
+      if (selected.has(pointIndex)) {
+        out.push({ start: tokens[i + 4].index, end: tokens[i + 4].index + tokens[i + 4].text.length });
+        out.push({ start: tokens[i + 5].index, end: tokens[i + 5].index + tokens[i + 5].text.length });
+      }
+      i += 6;
+      continue;
+    }
+
+    break;
+  }
+
+  return out.sort((a, b) => a.start - b.start);
+};
+
+const wrapEscapedRanges = (text: string, ranges: Array<{ start: number; end: number }>, cls: string) => {
+  if (!ranges.length) return escapeHtml(text);
+  const clean = ranges
+    .filter((r) => r.end > r.start)
+    .sort((a, b) => a.start - b.start);
+  let out = '';
+  let cursor = 0;
+  for (const r of clean) {
+    const start = clamp(r.start, 0, text.length);
+    const end = clamp(r.end, start, text.length);
+    if (start > cursor) out += escapeHtml(text.slice(cursor, start));
+    out += `<span class="${cls}">${escapeHtml(text.slice(start, end))}</span>`;
+    cursor = end;
+  }
+  if (cursor < text.length) out += escapeHtml(text.slice(cursor));
+  return out;
+};
+
+const highlightSelectedPathHtml = (code: string, selectedPath: number, selectedPoints: number[]) => {
   const re = /<path\b[^>]*>/gi;
   const matches = [...code.matchAll(re)];
   if (!matches.length || selectedPath < 0 || selectedPath >= matches.length) return escapeHtml(code);
@@ -556,7 +883,22 @@ const highlightSelectedPathHtml = (code: string, selectedPath: number) => {
 
   const start = m.index;
   const end = start + m[0].length;
-  return `${escapeHtml(code.slice(0, start))}<span class="selected-code">${escapeHtml(code.slice(start, end))}</span>${escapeHtml(code.slice(end))}`;
+  const tag = code.slice(start, end);
+  const dMatch = /d\s*=\s*(['"])([\s\S]*?)\1/i.exec(tag);
+  let tagHtml = escapeHtml(tag);
+
+  if (dMatch && selectedPoints.length) {
+    const value = dMatch[2];
+    const inMatch = dMatch[0].indexOf(value);
+    const valueStart = dMatch.index + (inMatch >= 0 ? inMatch : 0);
+    const valueRanges = getSelectedAnchorRangesInD(value, selectedPoints).map((r) => ({
+      start: valueStart + r.start,
+      end: valueStart + r.end,
+    }));
+    tagHtml = wrapEscapedRanges(tag, valueRanges, 'selected-point-code');
+  }
+
+  return `${escapeHtml(code.slice(0, start))}<span class="selected-code">${tagHtml}</span>${escapeHtml(code.slice(end))}`;
 };
 
 const pathIndexAtCaret = (code: string, caret: number): number | null => {
@@ -575,7 +917,7 @@ const pathIndexAtCaret = (code: string, caret: number): number | null => {
 const App = () => {
   const [tool, setTool] = useState<Tool>('select');
   const [drag, setDrag] = useState<DragTarget>(null);
-  const [shapes, setShapes] = useState<PathShape[]>([defaultPath('Path 1')]);
+  const [shapes, setShapes] = useState<PathShape[]>([createPresetPath('Path 1', 'roundedDiamond', width / 2, height / 2)]);
   const [selectedPath, setSelectedPath] = useState(0);
   const [selectedPaths, setSelectedPaths] = useState<number[]>([0]);
   const [pathSelected, setPathSelected] = useState(true);
@@ -597,25 +939,85 @@ const App = () => {
   const [marquee, setMarquee] = useState<{ start: Vec; current: Vec } | null>(null);
   const [docViewBox, setDocViewBox] = useState<ViewBox>(INTERNAL_VIEWBOX);
   const [copied, setCopied] = useState(false);
+  const [pathMetaMenu, setPathMetaMenu] = useState<{
+    pathIndex: number;
+    x: number;
+    y: number;
+    idValue: string;
+    classValue: string;
+  } | null>(null);
+  const [styleMenu, setStyleMenu] = useState<{ kind: StylePanel; x: number; y: number } | null>(null);
+  const [shapeMenu, setShapeMenu] = useState<{ x: number; y: number } | null>(null);
+  const [confirmDeletePath, setConfirmDeletePath] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [showViewBox, setShowViewBox] = useState(false);
   const codeOverlayRef = useRef<HTMLPreElement | null>(null);
+  const editorSvgRef = useRef<SVGSVGElement | null>(null);
   const codeDebounceRef = useRef<number | null>(null);
+  const lastShapesUpdateFromCodeRef = useRef(false);
+  const shapeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const styleTriggerRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const pathMetaMenuRef = useRef<HTMLFormElement | null>(null);
+  const shapeMenuRef = useRef<HTMLDivElement | null>(null);
+  const styleMenuRef = useRef<HTMLDivElement | null>(null);
 
   const activePath = shapes[selectedPath];
+  const transformTargetIndices = useMemo(() => {
+    if (transformAllPaths) return shapes.map((_, i) => i);
+    if (selectedPaths.length > 1) return [...selectedPaths].sort((a, b) => a - b);
+    return [selectedPath];
+  }, [transformAllPaths, shapes, selectedPaths, selectedPath]);
   const transformPoints = useMemo(
-    () => (transformAllPaths ? shapes.flatMap((shape) => shape.points) : activePath?.points ?? []),
-    [transformAllPaths, shapes, activePath],
+    () => transformTargetIndices.flatMap((i) => shapes[i]?.points ?? []),
+    [transformTargetIndices, shapes],
   );
   const transformBounds = useMemo(() => getPathBounds(transformPoints), [transformPoints]);
+  const transformPivot = useMemo(() => {
+    if (!transformPoints.length) return transformBounds ? { x: transformBounds.cx, y: transformBounds.cy } : { x: 0, y: 0 };
+    const sx = transformPoints.reduce((sum, p) => sum + p.p.x, 0);
+    const sy = transformPoints.reduce((sum, p) => sum + p.p.y, 0);
+    return { x: sx / transformPoints.length, y: sy / transformPoints.length };
+  }, [transformPoints, transformBounds]);
   const selectedPathBounds = useMemo(
     () => (pathSelected ? getPathBounds(activePath?.points ?? []) : null),
     [activePath, pathSelected],
   );
+  const transformUiAngleRad = useMemo(() => {
+    if (!pathSelected || transformAllPaths || !activePath || transformTargetIndices.length !== 1) return 0;
+    return ((activePath?.uiRotation ?? 0) * Math.PI) / 180;
+  }, [pathSelected, transformAllPaths, activePath, transformTargetIndices]);
+  const transformFrame = useMemo(() => {
+    if (!transformBounds) return null;
+    const c = drag?.kind === 'rotate' ? { ...drag.originCenter } : { x: transformPivot.x, y: transformPivot.y };
+    if (!pathSelected || transformAllPaths || transformTargetIndices.length !== 1 || Math.abs(transformUiAngleRad) < 0.0001 || !activePath) {
+      return { ...transformBounds, cx: c.x, cy: c.y, angle: 0 };
+    }
+    const unrot = activePath.points.map((pt) => rotateAround(pt.p, c, -transformUiAngleRad));
+    if (!unrot.length) return { ...transformBounds, cx: c.x, cy: c.y, angle: transformUiAngleRad };
+    const minX = Math.min(...unrot.map((p) => p.x));
+    const minY = Math.min(...unrot.map((p) => p.y));
+    const maxX = Math.max(...unrot.map((p) => p.x));
+    const maxY = Math.max(...unrot.map((p) => p.y));
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      cx: c.x,
+      cy: c.y,
+      angle: transformUiAngleRad,
+    };
+  }, [transformBounds, transformPivot, pathSelected, transformAllPaths, transformUiAngleRad, activePath, transformTargetIndices, drag]);
   const highlightedCodeHtml = useMemo(
-    () => highlightSelectedPathHtml(codeText, pathSelected ? selectedPath : -1),
-    [codeText, selectedPath, pathSelected],
+    () => highlightSelectedPathHtml(codeText, pathSelected ? selectedPath : -1, pathSelected ? selectedPoints : []),
+    [codeText, selectedPath, pathSelected, selectedPoints],
   );
 
   useEffect(() => {
+    if (lastShapesUpdateFromCodeRef.current) {
+      lastShapesUpdateFromCodeRef.current = false;
+      return;
+    }
     setCodeText(serializeSvg(shapes, docViewBox));
   }, [shapes, docViewBox]);
 
@@ -696,7 +1098,7 @@ const App = () => {
         e.preventDefault();
         setTool('pen');
       }
-      if (key === 's') {
+      if (key === 't') {
         e.preventDefault();
         setTool('scale');
         setPenHover(null);
@@ -713,11 +1115,31 @@ const App = () => {
       if ((e.metaKey || e.ctrlKey) && key === 'a') {
         e.preventDefault();
         if (!shapes.length) return;
+        const all = shapes[0]?.points.map((_, i) => i) ?? [0];
         setPathSelected(true);
         setSelectedPaths(shapes.map((_, i) => i));
         setSelectedPath(0);
-        setSelectedPoint(0);
-        setSelectedPoints([0]);
+        setSelectedPoint(all[0] ?? 0);
+        setSelectedPoints(all.length ? all : [0]);
+      }
+      if (key === 'delete' || key === 'backspace') {
+        e.preventDefault();
+        if (!pathSelected || shapes.length <= 1) return;
+        pushUndo();
+        const targets = new Set(selectedPaths.length ? selectedPaths : [selectedPath]);
+        setShapes((curr) => {
+          if (curr.length <= 1) return curr;
+          const next = curr.filter((_, i) => !targets.has(i));
+          if (!next.length) return curr;
+          const nextSel = clamp(selectedPath - 1, 0, next.length - 1);
+          const all = next[nextSel]?.points.map((_, i) => i) ?? [0];
+          setSelectedPath(nextSel);
+          setSelectedPaths([nextSel]);
+          setPathSelected(true);
+          setSelectedPoint(all[0] ?? 0);
+          setSelectedPoints(all.length ? all : [0]);
+          return next;
+        });
       }
     };
 
@@ -734,10 +1156,17 @@ const App = () => {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [shapes]);
+  }, [shapes, pathSelected, selectedPath, selectedPaths]);
 
   const updatePath = (pathIndex: number, mutator: (path: PathShape) => PathShape) => {
     setShapes((curr) => curr.map((path, i) => (i === pathIndex ? mutator(path) : path)));
+  };
+
+  const markGeometryDirty = (path: PathShape): PathShape =>
+    path.geometryDirty ? path : { ...path, geometryDirty: true };
+
+  const updatePathGeometry = (pathIndex: number, mutator: (path: PathShape) => PathShape) => {
+    updatePath(pathIndex, (path) => markGeometryDirty(mutator(path)));
   };
 
   const clampOriginForZoom = (origin: Vec, z: number): Vec => {
@@ -815,6 +1244,29 @@ const App = () => {
     };
   };
 
+  useEffect(() => {
+    const target = editorSvgRef.current;
+    if (!target) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = target.getBoundingClientRect();
+      const nx = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+      const ny = clamp((e.clientY - rect.top) / rect.height, 0, 1);
+      setCursorZoomFocus({ nx, ny });
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      if (factor < 1 && selectedPathBounds) {
+        zoomByFactorCenteredOnWorld(factor, selectedPathBounds.cx, selectedPathBounds.cy);
+      } else {
+        const focus = zoomFocusFromSelection();
+        zoomByFactorAt(factor, focus.nx, focus.ny);
+      }
+    };
+
+    target.addEventListener('wheel', handleWheel, { passive: false });
+    return () => target.removeEventListener('wheel', handleWheel);
+  }, [selectedPathBounds, zoom, viewOrigin, cursorZoomFocus]);
+
   const toLocal = (clientX: number, clientY: number, target: SVGSVGElement): Vec => {
     const ctm = target.getScreenCTM();
     if (ctm) {
@@ -835,31 +1287,46 @@ const App = () => {
 
   const pathDs = useMemo(() => shapes.map((shape) => pathData(shape.points, shape.closed)), [shapes]);
 
-  const addPath = () => {
+  const addPresetPath = (preset: ShapePreset) => {
     pushUndo();
-    setShapes((curr) => [...curr, defaultPath(`Path ${curr.length + 1}`)]);
-    setSelectedPath(shapes.length);
-    setPathSelected(true);
-    setSelectedPoint(0);
-    setSelectedPoints([0]);
-  };
-
-  const deletePath = () => {
-    pushUndo();
+    const centerX = viewOrigin.x + width / (2 * zoom);
+    const centerY = viewOrigin.y + height / (2 * zoom);
     setShapes((curr) => {
-      if (curr.length <= 1) return curr;
-      const next = curr.filter((_, i) => i !== selectedPath);
-      setSelectedPath(clamp(selectedPath - 1, 0, next.length - 1));
+      const created = createPresetPath(`Path ${curr.length + 1}`, preset, centerX, centerY);
+      const next = [...curr, created];
+      const idx = next.length - 1;
+      setSelectedPath(idx);
+      setSelectedPaths([idx]);
       setPathSelected(true);
       setSelectedPoint(0);
       setSelectedPoints([0]);
+      return next;
+    });
+    setShapeMenu(null);
+  };
+
+  const deletePath = () => {
+    if (!pathSelected || shapes.length <= 1) return;
+    pushUndo();
+    const targets = new Set(selectedPaths.length ? selectedPaths : [selectedPath]);
+    setShapes((curr) => {
+      if (curr.length <= 1) return curr;
+      const next = curr.filter((_, i) => !targets.has(i));
+      if (!next.length) return curr;
+      const nextSel = clamp(selectedPath - 1, 0, next.length - 1);
+      const all = next[nextSel]?.points.map((_, i) => i) ?? [0];
+      setSelectedPath(nextSel);
+      setSelectedPaths([nextSel]);
+      setPathSelected(true);
+      setSelectedPoint(all[0] ?? 0);
+      setSelectedPoints(all.length ? all : [0]);
       return next;
     });
   };
 
   const addPointOnSegment = (pathIndex: number, segmentIndex: number, pos: Vec) => {
     pushUndo();
-    updatePath(pathIndex, (path) => {
+    updatePathGeometry(pathIndex, (path) => {
       const created = makePoint(pos.x, pos.y);
       const idx = segmentIndex + 1;
       const points = [...path.points.slice(0, idx), created, ...path.points.slice(idx)];
@@ -872,7 +1339,7 @@ const App = () => {
 
   const deletePoint = (pathIndex: number, pointIndex: number) => {
     pushUndo();
-    updatePath(pathIndex, (path) => {
+    updatePathGeometry(pathIndex, (path) => {
       if (path.points.length <= 2) return path;
       const points = path.points.filter((_, i) => i !== pointIndex);
       const nextSelected = clamp(pointIndex - 1, 0, points.length - 1);
@@ -885,61 +1352,57 @@ const App = () => {
 
   const mergeSelectedAnchors = () => {
     if (!activePath || selectedPoints.length < 2) return;
-    const sorted = [...new Set(selectedPoints)].sort((a, b) => a - b);
-
-    const groups: number[][] = [];
-    let currGroup: number[] = [];
-    for (const idx of sorted) {
-      if (!currGroup.length || idx === currGroup[currGroup.length - 1] + 1) currGroup.push(idx);
-      else {
-        groups.push(currGroup);
-        currGroup = [idx];
-      }
-    }
-    if (currGroup.length) groups.push(currGroup);
+    const mergeDistance = Math.max(MERGE_MAX_STEP_DISTANCE, simplifyThreshold);
 
     pushUndo();
-    updatePath(selectedPath, (path) => {
+    updatePathGeometry(selectedPath, (path) => {
       let points = [...path.points];
+      let selected = [...new Set(selectedPoints)].sort((a, b) => a - b).filter((i) => i >= 0 && i < points.length);
       const mergedAt: number[] = [];
+      let didMerge = false;
 
-      for (const g of [...groups].reverse()) {
-        if (g.length < 2) continue;
-        const start = g[0];
-        const end = g[g.length - 1];
-        const pts = points.slice(start, end + 1);
-        if (pts.length < 2) continue;
+      while (selected.length > 1) {
+        let bestI = -1;
+        let bestJ = -1;
+        let bestD = Number.POSITIVE_INFINITY;
 
-        let near = true;
-        for (let i = 1; i < pts.length; i += 1) {
-          if (dist(pts[i - 1].p, pts[i].p) > MERGE_MAX_STEP_DISTANCE) {
-            near = false;
-            break;
+        for (let i = 0; i < selected.length - 1; i += 1) {
+          for (let j = i + 1; j < selected.length; j += 1) {
+            const ai = selected[i];
+            const aj = selected[j];
+            const d = dist(points[ai].p, points[aj].p);
+            if (d < bestD) {
+              bestD = d;
+              bestI = i;
+              bestJ = j;
+            }
           }
         }
-        if (!near) continue;
 
-        const cx = pts.reduce((s, p) => s + p.p.x, 0) / pts.length;
-        const cy = pts.reduce((s, p) => s + p.p.y, 0) / pts.length;
-        const anchor = { x: cx, y: cy };
+        if (bestI < 0 || bestJ < 0) break;
+        // If only two points are selected, allow one merge even when slightly farther apart.
+        if (bestD > mergeDistance && !(selected.length === 2 && !didMerge)) break;
 
-        const first = pts[0];
-        const last = pts[pts.length - 1];
-        const mergedBase = mergePointPair(first, last);
-        const ax = anchor.x - mergedBase.p.x;
-        const ay = anchor.y - mergedBase.p.y;
-        const merged: Point = {
-          ...mergedBase,
-          p: anchor,
-          in: mergedBase.in ? { x: mergedBase.in.x + ax, y: mergedBase.in.y + ay } : null,
-          out: mergedBase.out ? { x: mergedBase.out.x + ax, y: mergedBase.out.y + ay } : null,
-        };
-        points = [...points.slice(0, start), merged, ...points.slice(end + 1)];
+        const a = selected[bestI];
+        const b = selected[bestJ];
+        const start = Math.min(a, b);
+        const end = Math.max(a, b);
+        const merged = mergePointPair(points[start], points[end]);
+
+        points = [...points.slice(0, start), merged, ...points.slice(start + 1, end), ...points.slice(end + 1)];
         mergedAt.push(start);
+        didMerge = true;
+
+        selected = selected
+          .filter((idx) => idx !== start && idx !== end)
+          .map((idx) => (idx > end ? idx - 1 : idx))
+          .sort((x, y) => x - y);
+        selected.push(start);
+        selected.sort((x, y) => x - y);
       }
 
       if (!mergedAt.length) return path;
-      const nextSel = [...mergedAt].sort((a, b) => a - b);
+      const nextSel = [...new Set(mergedAt)].sort((a, b) => a - b);
       setSelectedPoints(nextSel);
       setSelectedPoint(nextSel[0]);
       return { ...path, points };
@@ -949,23 +1412,23 @@ const App = () => {
   const simplifyPathOrSvg = () => {
     pushUndo();
     if (pathSelected) {
-      updatePath(selectedPath, (path) => simplifyPathByThreshold(path, simplifyThreshold));
+      updatePathGeometry(selectedPath, (path) => simplifyPathByThreshold(path, simplifyThreshold));
       setSelectedPoint(0);
       setSelectedPoints([0]);
       return;
     }
-    setShapes((curr) => curr.map((path) => simplifyPathByThreshold(path, simplifyThreshold)));
+    setShapes((curr) => curr.map((path) => markGeometryDirty(simplifyPathByThreshold(path, simplifyThreshold))));
   };
 
   const smoothPathOrSvg = () => {
     pushUndo();
     if (pathSelected) {
-      updatePath(selectedPath, (path) => smoothSharpCorners(path));
+      updatePathGeometry(selectedPath, (path) => smoothSharpCorners(path));
       setSelectedPoint(0);
       setSelectedPoints([0]);
       return;
     }
-    setShapes((curr) => curr.map((path) => smoothSharpCorners(path)));
+    setShapes((curr) => curr.map((path) => markGeometryDirty(smoothSharpCorners(path))));
   };
 
   const onCanvasMove = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -1012,8 +1475,10 @@ const App = () => {
         const rawSx = Math.abs((pos.x - origin.x) / svx);
         const rawSy = Math.abs((pos.y - origin.y) / svy);
 
-        const sx = uniformMode ? clamp(Math.max(rawSx, rawSy), 0.05, 20) : clamp(rawSx, 0.05, 20);
-        const sy = uniformMode ? sx : clamp(rawSy, 0.05, 20);
+        let sx = uniformMode ? clamp(Math.max(rawSx, rawSy), 0.05, 20) : clamp(rawSx, 0.05, 20);
+        let sy = uniformMode ? sx : clamp(rawSy, 0.05, 20);
+        if (drag.axis === 'x') sy = 1;
+        if (drag.axis === 'y') sx = 1;
 
         const map = (v: Vec): Vec => ({
           x: origin.x + (v.x - origin.x) * sx,
@@ -1021,8 +1486,8 @@ const App = () => {
         });
 
         return drag.baseShapes.map((shape, i) => {
-          if (!drag.affectAll && i !== drag.pathIndex) return shape;
-          return {
+          if (!drag.targetPathIndices.includes(i)) return shape;
+          return markGeometryDirty({
             ...shape,
             points: shape.points.map((pt) => ({
               ...pt,
@@ -1030,7 +1495,7 @@ const App = () => {
               in: pt.in ? map(pt.in) : null,
               out: pt.out ? map(pt.out) : null,
             })),
-          };
+          });
         });
       });
       return;
@@ -1043,8 +1508,8 @@ const App = () => {
         const map = (v: Vec): Vec => ({ x: v.x + dx, y: v.y + dy });
 
         return drag.baseShapes.map((shape, i) => {
-          if (!drag.affectAll && i !== drag.pathIndex) return shape;
-          return {
+          if (!drag.targetPathIndices.includes(i)) return shape;
+          return markGeometryDirty({
             ...shape,
             points: shape.points.map((pt) => ({
               ...pt,
@@ -1052,7 +1517,40 @@ const App = () => {
               in: pt.in ? map(pt.in) : null,
               out: pt.out ? map(pt.out) : null,
             })),
+          });
+        });
+      });
+      return;
+    }
+
+    if (drag.kind === 'rotate') {
+      setShapes(() => {
+        const currentAngle = Math.atan2(pos.y - drag.originCenter.y, pos.x - drag.originCenter.x);
+        const delta = currentAngle - drag.startAngle;
+        const deltaDeg = (delta * 180) / Math.PI;
+        const cos = Math.cos(delta);
+        const sin = Math.sin(delta);
+        const map = (v: Vec): Vec => {
+          const dx = v.x - drag.originCenter.x;
+          const dy = v.y - drag.originCenter.y;
+          return {
+            x: drag.originCenter.x + dx * cos - dy * sin,
+            y: drag.originCenter.y + dx * sin + dy * cos,
           };
+        };
+
+        return drag.baseShapes.map((shape, i) => {
+          if (!drag.targetPathIndices.includes(i)) return shape;
+          return markGeometryDirty({
+            ...shape,
+            uiRotation: shape.uiRotation + deltaDeg,
+            points: shape.points.map((pt) => ({
+              ...pt,
+              p: map(pt.p),
+              in: pt.in ? map(pt.in) : null,
+              out: pt.out ? map(pt.out) : null,
+            })),
+          });
         });
       });
       return;
@@ -1091,7 +1589,7 @@ const App = () => {
           if (pt.in) pt.in = mirrorHandle(pt.p, pt.out);
         }
 
-        return { ...path, points };
+        return markGeometryDirty({ ...path, points });
       }),
     );
   };
@@ -1119,6 +1617,7 @@ const App = () => {
       return;
     }
     if (fromUser) pushUndo();
+    lastShapesUpdateFromCodeRef.current = true;
     setCodeError('');
     setDocViewBox(parsed.viewBox);
     setShapes(parsed.shapes);
@@ -1129,15 +1628,40 @@ const App = () => {
     setSelectedPoints([0]);
   };
 
-  const updateActiveStyle = (patch: Partial<Pick<PathShape, 'fill' | 'stroke' | 'strokeWidth' | 'closed'>>) => {
+  const updateActiveStyle = (patch: Partial<Pick<PathShape, 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'closed'>>) => {
     pushUndo();
-    updatePath(selectedPath, (path) => ({
-      ...path,
-      ...patch,
-      fillExplicit: patch.fill !== undefined ? true : path.fillExplicit,
-      strokeExplicit: patch.stroke !== undefined ? true : path.strokeExplicit,
-      strokeWidthExplicit: patch.strokeWidth !== undefined ? true : path.strokeWidthExplicit,
-    }));
+    const targets = pathSelected && selectedPaths.length ? new Set(selectedPaths) : new Set([selectedPath]);
+    setShapes((curr) =>
+      curr.map((path, i) => {
+        if (!targets.has(i)) return path;
+        return {
+          ...path,
+          ...patch,
+          geometryDirty: patch.closed !== undefined ? true : path.geometryDirty,
+          fillExplicit: patch.fill !== undefined ? true : path.fillExplicit,
+          strokeExplicit: patch.stroke !== undefined ? true : path.strokeExplicit,
+          strokeWidthExplicit: patch.strokeWidth !== undefined ? true : path.strokeWidthExplicit,
+          opacityExplicit: patch.opacity !== undefined ? true : path.opacityExplicit,
+        };
+      }),
+    );
+  };
+
+  const activeFill = useMemo(() => parseColorToRgba(activePath.fill, { r: 88, g: 166, b: 255, a: 0.33 }), [activePath.fill]);
+  const activeStroke = useMemo(
+    () => parseColorToRgba(activePath.stroke, { r: 121, g: 192, b: 255, a: 1 }),
+    [activePath.stroke],
+  );
+
+  const strokeControlDisabled =
+    pathSelected && selectedPaths.length
+      ? selectedPaths.every((i) => (shapes[i]?.strokeWidth ?? 0) <= 0)
+      : activePath.strokeWidth <= 0;
+  const canDeletePath = pathSelected && shapes.length > 1;
+
+  const allPointIndicesForPath = (pathIndex: number) => {
+    const all = shapes[pathIndex]?.points.map((_, i) => i) ?? [];
+    return all.length ? all : [0];
   };
 
   const syncSelectionFromCodeCursor = (el: HTMLTextAreaElement) => {
@@ -1146,11 +1670,12 @@ const App = () => {
     if (idx === null) return;
     if (idx < 0 || idx >= shapes.length) return;
     if (idx === selectedPath) return;
+    const all = allPointIndicesForPath(idx);
     setPathSelected(true);
     setSelectedPath(idx);
     setSelectedPaths([idx]);
-    setSelectedPoint(0);
-    setSelectedPoints([0]);
+    setSelectedPoint(all[0]);
+    setSelectedPoints(all);
   };
 
   const copySvgCode = async () => {
@@ -1163,32 +1688,183 @@ const App = () => {
     }
   };
 
+  const openPathMetaMenu = (pathIndex: number, rect: DOMRect) => {
+    const path = shapes[pathIndex];
+    if (!path) return;
+    const menuW = 260;
+    const menuH = 168;
+    const pad = 8;
+    const x = clamp(rect.left, pad, Math.max(pad, window.innerWidth - menuW - pad));
+    const y = clamp(rect.bottom + 6, pad, Math.max(pad, window.innerHeight - menuH - pad));
+    setPathMetaMenu({
+      pathIndex,
+      x,
+      y,
+      idValue: path.svgId,
+      classValue: path.svgClass,
+    });
+    setShapeMenu(null);
+    setStyleMenu(null);
+  };
+
+  const applyPathMetaMenu = () => {
+    if (!pathMetaMenu) return;
+    pushUndo();
+    setShapes((curr) =>
+      curr.map((path, i) =>
+        i === pathMetaMenu.pathIndex
+          ? { ...path, svgId: pathMetaMenu.idValue.trim(), svgClass: pathMetaMenu.classValue.trim() }
+          : path,
+      ),
+    );
+    setPathMetaMenu(null);
+  };
+
+  const openStyleMenu = (kind: StylePanel, rect: DOMRect) => {
+    const menuW = 250;
+    const menuH = kind === 'stroke' ? 198 : kind === 'opacity' ? 120 : 164;
+    const pad = 8;
+    const x = clamp(rect.right + 8, pad, Math.max(pad, window.innerWidth - menuW - pad));
+    const y = clamp(rect.top, pad, Math.max(pad, window.innerHeight - menuH - pad));
+    setStyleMenu({ kind, x, y });
+    setShapeMenu(null);
+    setPathMetaMenu(null);
+  };
+
+  useEffect(() => {
+    if (!canDeletePath && confirmDeletePath) setConfirmDeletePath(false);
+  }, [canDeletePath, confirmDeletePath]);
+
+  useEffect(() => {
+    if (!aboutOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAboutOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [aboutOpen]);
+
+  useEffect(() => {
+    if (!pathMetaMenu && !shapeMenu && !styleMenu) return;
+    const onWindowPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      const inPathMeta = !!pathMetaMenuRef.current?.contains(target);
+      const inShapeMenu = !!shapeMenuRef.current?.contains(target);
+      const inStyleMenu = !!styleMenuRef.current?.contains(target);
+      const inShapeTrigger = !!shapeTriggerRef.current?.contains(target);
+      const inStyleTrigger = styleTriggerRefs.current.some((el) => !!el?.contains(target));
+      if (inPathMeta || inShapeMenu || inStyleMenu || inShapeTrigger || inStyleTrigger) return;
+      setPathMetaMenu(null);
+      setShapeMenu(null);
+      setStyleMenu(null);
+      setConfirmDeletePath(false);
+    };
+    window.addEventListener('pointerdown', onWindowPointerDown, true);
+    return () => window.removeEventListener('pointerdown', onWindowPointerDown, true);
+  }, [pathMetaMenu, shapeMenu, styleMenu]);
+
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      onPointerDown={() => {
+        setPathMetaMenu(null);
+        setShapeMenu(null);
+        setStyleMenu(null);
+        setConfirmDeletePath(false);
+      }}
+    >
       <header className="topbar">
-        <h1>SVG Editor</h1>
+        <button className="brand-trigger" type="button" onClick={() => setAboutOpen(true)} title="About Bz">
+          <span className="brand-mark">
+            <span className="brand-b">B</span>
+            <span className="brand-insert">é</span>
+            <span className="brand-z">z</span>
+            <span className="brand-tail">ier</span>
+          </span>
+        </button>
         <div className="path-tabs">
           {shapes.map((shape, i) => (
             <button
               key={shape.id}
-              className={i === selectedPath ? 'tab active' : 'tab'}
+              className={`${pathSelected && i === selectedPath ? 'tab active' : 'tab'}${pathMetaMenu?.pathIndex === i ? ' menu-open' : ''}`}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                openPathMetaMenu(i, rect);
+              }}
               onClick={() => {
+                const all = allPointIndicesForPath(i);
                 setPathSelected(true);
                 setSelectedPath(i);
                 setSelectedPaths([i]);
-                setSelectedPoint(0);
-                setSelectedPoints([0]);
+                setSelectedPoint(all[0]);
+                setSelectedPoints(all);
               }}
             >
-              {shape.name}
+              {shape.svgId.trim() || shape.name}
             </button>
           ))}
-          <button className="icon-btn" onClick={addPath} title="Add Path">
-            <Plus />
+          <button
+            ref={shapeTriggerRef}
+            className="icon-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              const menuW = 208;
+              const menuH = 58;
+              const pad = 8;
+              const x = clamp(rect.left, pad, Math.max(pad, window.innerWidth - menuW - pad));
+              const y = clamp(rect.bottom + 6, pad, Math.max(pad, window.innerHeight - menuH - pad));
+              setShapeMenu({ x, y });
+              setStyleMenu(null);
+              setPathMetaMenu(null);
+            }}
+            title="Add Preset Shape"
+          >
+            <Shapes />
           </button>
-          <button className="icon-btn" onClick={deletePath} title="Delete Path">
-            <Trash2 />
-          </button>
+          {!confirmDeletePath ? (
+            <button
+              className="icon-btn delete-path-btn"
+              disabled={!canDeletePath}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!canDeletePath) return;
+                setConfirmDeletePath(true);
+              }}
+              title="Delete Path"
+            >
+              <Trash2 />
+            </button>
+          ) : (
+            <>
+              <button
+                className="control-btn confirm-text"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deletePath();
+                  setConfirmDeletePath(false);
+                }}
+                title="Confirm Delete"
+              >
+                Confirm delete
+              </button>
+              <button
+                className="icon-btn confirm-no"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConfirmDeletePath(false);
+                }}
+                title="Cancel"
+              >
+                <X />
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -1203,11 +1879,11 @@ const App = () => {
               setTool('select');
               setPenHover(null);
             }}
-            title="Select Tool"
+            title="Select Tool (V)"
           >
             <MousePointer2 />
           </button>
-          <button className={tool === 'pen' ? 'tool active' : 'tool'} onClick={() => setTool('pen')} title="Pen Tool">
+          <button className={tool === 'pen' ? 'tool active' : 'tool'} onClick={() => setTool('pen')} title="Pen Tool (P)">
             <PenTool />
           </button>
           <button
@@ -1216,41 +1892,101 @@ const App = () => {
               setTool('scale');
               setPenHover(null);
             }}
-            title="Scale Tool"
+            title="Transform Tool (T)"
           >
             <Expand />
+          </button>
+          <div className="tool-divider" />
+          <button
+            ref={(el) => {
+              styleTriggerRefs.current[0] = el;
+            }}
+            className={styleMenu?.kind === 'fill' ? 'tool active' : 'tool'}
+            title="Fill"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (styleMenu?.kind === 'fill') setStyleMenu(null);
+              else openStyleMenu('fill', e.currentTarget.getBoundingClientRect());
+            }}
+          >
+            <PaintBucket />
+          </button>
+          <button
+            ref={(el) => {
+              styleTriggerRefs.current[1] = el;
+            }}
+            className={styleMenu?.kind === 'stroke' ? 'tool active' : 'tool'}
+            title="Stroke"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (styleMenu?.kind === 'stroke') setStyleMenu(null);
+              else openStyleMenu('stroke', e.currentTarget.getBoundingClientRect());
+            }}
+          >
+            <PenLine />
+          </button>
+          <button
+            ref={(el) => {
+              styleTriggerRefs.current[2] = el;
+            }}
+            className={styleMenu?.kind === 'opacity' ? 'tool active' : 'tool'}
+            title="Opacity"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (styleMenu?.kind === 'opacity') setStyleMenu(null);
+              else openStyleMenu('opacity', e.currentTarget.getBoundingClientRect());
+            }}
+          >
+            <SquareDashed />
+          </button>
+          <div className="tool-divider" />
+          <button
+            className="tool"
+            onClick={smoothPathOrSvg}
+            title={pathSelected ? 'Smooth Path' : 'Smooth SVG'}
+          >
+            <WandSparkles />
+          </button>
+          <button
+            className="tool"
+            onClick={mergeSelectedAnchors}
+            disabled={!pathSelected || selectedPoints.length < 2}
+            title="Merge Points"
+          >
+            <Merge />
           </button>
         </aside>
 
         <section className="left-pane">
           <div className="controls-row">
-            <label>
-              Fill
-              <input type="color" value={activePath.fill} onChange={(e) => updateActiveStyle({ fill: e.target.value })} />
-            </label>
-            <label>
-              Stroke
-              <input type="color" value={activePath.stroke} onChange={(e) => updateActiveStyle({ stroke: e.target.value })} />
-            </label>
-            <label>
-              Width
-              <input
-                type="range"
-                min={0}
-                max={24}
-                value={activePath.strokeWidth}
-                onChange={(e) => updateActiveStyle({ strokeWidth: Number(e.target.value) })}
+            <button
+              className={`control-btn text-sm switch-btn${activePath.closed ? ' active' : ''}`}
+              type="button"
+              onClick={() => updateActiveStyle({ closed: !activePath.closed })}
+              aria-pressed={activePath.closed}
+              title="Closed"
+            >
+              <span className="switch-track" aria-hidden="true">
+                <span className="switch-thumb" />
+              </span>
+              <span>Closed</span>
+            </button>
+            <span className="control-group-divider" aria-hidden="true" />
+            <div className="control-group simplify-group">
+              <SliderInline
+                label="Simplify threshold"
+                min={2}
+                max={40}
+                value={simplifyThreshold}
+                onChange={(v) => setSimplifyThreshold(Math.round(v))}
               />
-              <strong>{activePath.strokeWidth}px</strong>
-            </label>
-            <label>
-              Closed
-              <input
-                type="checkbox"
-                checked={activePath.closed}
-                onChange={(e) => updateActiveStyle({ closed: e.target.checked })}
-              />
-            </label>
+              <button className="control-btn text-sm" type="button" onClick={simplifyPathOrSvg}>
+                {pathSelected ? 'Simplify Path' : 'Simplify SVG'}
+              </button>
+            </div>
             {tool === 'scale' ? (
               <label>
                 All Paths
@@ -1262,65 +1998,60 @@ const App = () => {
               </label>
             ) : null}
             <div className="controls-actions">
-              <label className="zoom-group">
-                Simplify
-                <input
-                  type="range"
-                  min={2}
-                  max={40}
-                  value={simplifyThreshold}
-                  onChange={(e) => setSimplifyThreshold(Number(e.target.value))}
-                />
-                <strong className="zoom-readout">{simplifyThreshold}px</strong>
-                <button className="control-btn" type="button" onClick={simplifyPathOrSvg}>
-                  {pathSelected ? 'Simplify Path' : 'Simplify SVG'}
-                </button>
-              </label>
-              <button className="control-btn" type="button" onClick={smoothPathOrSvg}>
-                {pathSelected ? 'Smooth Path' : 'Smooth SVG'}
-              </button>
               <button
-                className="control-btn"
-                onClick={mergeSelectedAnchors}
-                disabled={!pathSelected || selectedPoints.length < 2}
-                title="Merge contiguous, close selected points"
+                className={`control-btn text-sm switch-btn${showViewBox ? ' active' : ''}`}
+                type="button"
+                onClick={() => setShowViewBox((v) => !v)}
+                aria-pressed={showViewBox}
+                title="Show viewBox"
               >
-                Merge Points
+                <span className="switch-track" aria-hidden="true">
+                  <span className="switch-thumb" />
+                </span>
+                <span>Show viewBox</span>
               </button>
-              <label className="zoom-group">
-                Zoom
-                <button
-                  className="control-btn"
-                  type="button"
-                  onClick={() => {
-                    if (selectedPathBounds) {
-                      zoomByFactorCenteredOnWorld(1 / 1.2, selectedPathBounds.cx, selectedPathBounds.cy);
-                    } else {
+              <span className="control-group-divider" aria-hidden="true" />
+              <div className="control-group">
+                <div className="zoom-controls">
+                  <button
+                    className="control-btn icon-only"
+                    type="button"
+                    onClick={() => {
+                      if (selectedPathBounds) {
+                        zoomByFactorCenteredOnWorld(1 / 1.2, selectedPathBounds.cx, selectedPathBounds.cy);
+                      } else {
+                        const { nx, ny } = zoomFocusFromSelection();
+                        zoomByFactorAt(1 / 1.2, nx, ny);
+                      }
+                    }}
+                    title="Zoom Out"
+                  >
+                    <ZoomOut />
+                  </button>
+                  <strong className="zoom-readout">{Math.round(zoom * 100)}%</strong>
+                  <button
+                    className="control-btn icon-only"
+                    type="button"
+                    onClick={() => {
                       const { nx, ny } = zoomFocusFromSelection();
-                      zoomByFactorAt(1 / 1.2, nx, ny);
-                    }
-                  }}
-                  title="Zoom Out"
-                >
-                  -
-                </button>
-                <strong className="zoom-readout">{Math.round(zoom * 100)}%</strong>
-                <button
-                  className="control-btn"
-                  type="button"
-                  onClick={() => {
-                    const { nx, ny } = zoomFocusFromSelection();
-                    zoomByFactorAt(1.2, nx, ny);
-                  }}
-                  title="Zoom In"
-                >
-                  +
-                </button>
-                <button className="control-btn" type="button" onClick={resetView} title="Reset View">
-                  100%
-                </button>
-              </label>
-              <button className="control-btn icon-only" onClick={undo} disabled={!undoStack.length} title="Undo (Cmd/Ctrl+Z)">
+                      zoomByFactorAt(1.2, nx, ny);
+                    }}
+                    title="Zoom In"
+                  >
+                    <ZoomIn />
+                  </button>
+                  <button className="control-btn text-sm" type="button" onClick={resetView} title="Reset View">
+                    100%
+                  </button>
+                </div>
+              </div>
+              <span className="control-group-divider" aria-hidden="true" />
+              <button
+                className="control-btn icon-only"
+                onClick={undo}
+                disabled={!undoStack.length}
+                title="Undo (Cmd/Ctrl+Z)"
+              >
                 <Undo2 />
               </button>
               <button
@@ -1335,6 +2066,7 @@ const App = () => {
           </div>
 
           <svg
+            ref={editorSvgRef}
             className={spaceDown ? 'editor pan' : tool === 'pen' ? 'editor pen' : tool === 'scale' ? 'editor scale' : 'editor'}
             viewBox={`${viewOrigin.x} ${viewOrigin.y} ${width / zoom} ${height / zoom}`}
             onPointerDown={(e) => {
@@ -1353,20 +2085,6 @@ const App = () => {
               setDrag(null);
               setCursorZoomFocus(null);
               if (tool === 'pen') setPenHover(null);
-            }}
-            onWheel={(e) => {
-              e.preventDefault();
-              const rect = e.currentTarget.getBoundingClientRect();
-              const nx = clamp((e.clientX - rect.left) / rect.width, 0, 1);
-              const ny = clamp((e.clientY - rect.top) / rect.height, 0, 1);
-              setCursorZoomFocus({ nx, ny });
-              const factor = Math.exp(-e.deltaY * 0.0015);
-              if (factor < 1 && selectedPathBounds) {
-                zoomByFactorCenteredOnWorld(factor, selectedPathBounds.cx, selectedPathBounds.cy);
-              } else {
-                const focus = zoomFocusFromSelection();
-                zoomByFactorAt(factor, focus.nx, focus.ny);
-              }
             }}
             onClick={onCanvasClick}
           >
@@ -1389,12 +2107,7 @@ const App = () => {
               onPointerDown={(e) => {
                 if (spaceDown) return;
                 e.stopPropagation();
-                if (tool !== 'select') {
-                  setPathSelected(false);
-                  setSelectedPaths([]);
-                  setSelectedPoints([]);
-                  return;
-                }
+                if (tool !== 'select') return;
                 const svg = e.currentTarget.ownerSVGElement;
                 if (!svg) return;
                 const start = toLocal(e.clientX, e.clientY, svg);
@@ -1418,9 +2131,33 @@ const App = () => {
                 const h = maxY - minY;
 
                 if (w < 2 && h < 2) {
-                  setPathSelected(false);
-                  setSelectedPaths([]);
-                  setSelectedPoints([]);
+                  setMarquee(null);
+                  return;
+                }
+
+                // Point-marquee selection should work whether or not a path was preselected.
+                const pointHitsByPath = shapes
+                  .map((shape, pathIndex) => ({
+                    pathIndex,
+                    points: shape.points
+                      .map((pt, i) => ({ i, pt }))
+                      .filter(({ pt }) => pt.p.x >= minX && pt.p.x <= maxX && pt.p.y >= minY && pt.p.y <= maxY)
+                      .map(({ i }) => i),
+                  }))
+                  .filter((hit) => hit.points.length > 0);
+
+                if (pointHitsByPath.length) {
+                  const preferred = pointHitsByPath.find((h) => h.pathIndex === selectedPath);
+                  const best =
+                    preferred ??
+                    pointHitsByPath.reduce((acc, curr) =>
+                      curr.points.length > acc.points.length ? curr : curr.points.length === acc.points.length && curr.pathIndex < acc.pathIndex ? curr : acc,
+                    );
+                  setPathSelected(true);
+                  setSelectedPaths([best.pathIndex]);
+                  setSelectedPath(best.pathIndex);
+                  setSelectedPoints(best.points);
+                  setSelectedPoint(best.points[0]);
                   setMarquee(null);
                   return;
                 }
@@ -1435,19 +2172,38 @@ const App = () => {
                   .map(({ i }) => i);
 
                 if (hits.length) {
+                  const all = allPointIndicesForPath(hits[0]);
                   setPathSelected(true);
                   setSelectedPaths(hits);
                   setSelectedPath(hits[0]);
-                  setSelectedPoint(0);
-                  setSelectedPoints([0]);
-                } else {
-                  setPathSelected(false);
-                  setSelectedPaths([]);
-                  setSelectedPoints([]);
+                  setSelectedPoint(all[0]);
+                  setSelectedPoints(all);
                 }
                 setMarquee(null);
               }}
             />
+            {showViewBox ? (
+              <>
+                <rect
+                  x={docViewBox.minX}
+                  y={docViewBox.minY}
+                  width={docViewBox.vbW}
+                  height={docViewBox.vbH}
+                  className="viewbox-overlay"
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="none"
+                />
+                <text
+                  x={docViewBox.minX + 8 / zoom}
+                  y={docViewBox.minY + 16 / zoom}
+                  className="viewbox-label"
+                  style={{ fontSize: `${11 / zoom}px` }}
+                  pointerEvents="none"
+                >
+                  {`viewBox ${docViewBox.minX.toFixed(2)} ${docViewBox.minY.toFixed(2)} ${docViewBox.vbW.toFixed(2)} ${docViewBox.vbH.toFixed(2)}`}
+                </text>
+              </>
+            ) : null}
 
             {shapes.map((shape, i) => (
               <path
@@ -1456,7 +2212,7 @@ const App = () => {
                 fill={shape.fillExplicit ? shape.fill : '#000000'}
                 stroke={shape.strokeExplicit ? shape.stroke : 'none'}
                 strokeWidth={shape.strokeWidthExplicit ? shape.strokeWidth : undefined}
-                opacity={!pathSelected ? 1 : selectedPaths.includes(i) ? 1 : 0.5}
+                opacity={(shape.opacityExplicit ? shape.opacity : 1) * (!pathSelected ? 1 : selectedPaths.includes(i) ? 1 : 0.5)}
                 onPointerDown={(e) => {
                   if (!spaceDown && (tool === 'select' || tool === 'scale')) {
                     setPathSelected(true);
@@ -1465,16 +2221,18 @@ const App = () => {
                         const exists = curr.includes(i);
                         const next = exists ? curr.filter((v) => v !== i) : [...curr, i].sort((a, b) => a - b);
                         const safe = next.length ? next : [i];
+                        const all = allPointIndicesForPath(safe[0]);
                         setSelectedPath(safe[0]);
-                        setSelectedPoint(0);
-                        setSelectedPoints([0]);
+                        setSelectedPoint(all[0]);
+                        setSelectedPoints(all);
                         return safe;
                       });
                     } else {
+                      const all = allPointIndicesForPath(i);
                       setSelectedPaths([i]);
                       setSelectedPath(i);
-                      setSelectedPoint(0);
-                      setSelectedPoints([0]);
+                      setSelectedPoint(all[0]);
+                      setSelectedPoints(all);
                     }
                   }
                 }}
@@ -1499,7 +2257,7 @@ const App = () => {
               selectedPaths.length === 1 &&
               activePath.points.map((pt, i) => (
               <g key={pt.id}>
-                {tool === 'select' && i === selectedPoint && pt.in && (
+                {tool === 'select' && selectedPoints.length === 1 && i === selectedPoint && pt.in && (
                   <>
                     <line
                       x1={pt.p.x}
@@ -1530,7 +2288,7 @@ const App = () => {
                   </>
                 )}
 
-                {tool === 'select' && i === selectedPoint && pt.out && (
+                {tool === 'select' && selectedPoints.length === 1 && i === selectedPoint && pt.out && (
                   <>
                     <line
                       x1={pt.p.x}
@@ -1562,10 +2320,10 @@ const App = () => {
                 )}
 
                 <rect
-                  x={pt.p.x - (i === selectedPoint ? 2.5 : 2) / zoom}
-                  y={pt.p.y - (i === selectedPoint ? 2.5 : 2) / zoom}
-                  width={(i === selectedPoint ? 5 : 4) / zoom}
-                  height={(i === selectedPoint ? 5 : 4) / zoom}
+                  x={pt.p.x - (selectedPoints.length === 1 && i === selectedPoint ? 2.5 : 2) / zoom}
+                  y={pt.p.y - (selectedPoints.length === 1 && i === selectedPoint ? 2.5 : 2) / zoom}
+                  width={(selectedPoints.length === 1 && i === selectedPoint ? 5 : 4) / zoom}
+                  height={(selectedPoints.length === 1 && i === selectedPoint ? 5 : 4) / zoom}
                   className={
                     penHover?.kind === 'anchor' && penHover.pointIndex === i
                       ? 'anchor pen-delete'
@@ -1573,7 +2331,7 @@ const App = () => {
                         ? 'anchor selected'
                         : 'anchor'
                   }
-                  style={{ strokeWidth: (i === selectedPoint ? 1.4 : 1.1) / zoom }}
+                  style={{ strokeWidth: (selectedPoints.length === 1 && i === selectedPoint ? 1.4 : 1.1) / zoom }}
                   onPointerDown={(e) => {
                     if (tool !== 'select' || spaceDown) return;
                     e.stopPropagation();
@@ -1600,13 +2358,27 @@ const App = () => {
               </g>
             ))}
 
-            {tool === 'scale' && transformBounds ? (
+            {tool === 'scale' && transformFrame ? (
               <>
-                <rect
-                  x={transformBounds.minX}
-                  y={transformBounds.minY}
-                  width={Math.max(1, transformBounds.maxX - transformBounds.minX)}
-                  height={Math.max(1, transformBounds.maxY - transformBounds.minY)}
+                {(() => {
+                  const b = transformFrame;
+                  const c = { x: b.cx, y: b.cy };
+                  const rot = (p: Vec) => rotateAround(p, c, b.angle);
+                  const tl = rot({ x: b.minX, y: b.minY });
+                  const tr = rot({ x: b.maxX, y: b.minY });
+                  const br = rot({ x: b.maxX, y: b.maxY });
+                  const bl = rot({ x: b.minX, y: b.maxY });
+                  const topMid = rot({ x: b.cx, y: b.minY });
+                  const rotArmEnd = rot({ x: b.cx, y: b.minY - 18 / zoom });
+                  const rotHandle = rot({ x: b.cx, y: b.minY - 22 / zoom });
+                  const axisX1 = rot({ x: b.cx - 8 / zoom, y: b.cy });
+                  const axisX2 = rot({ x: b.cx + 8 / zoom, y: b.cy });
+                  const axisY1 = rot({ x: b.cx, y: b.cy - 8 / zoom });
+                  const axisY2 = rot({ x: b.cx, y: b.cy + 8 / zoom });
+                  return (
+                    <>
+                <path
+                  d={`M ${tl.x} ${tl.y} L ${tr.x} ${tr.y} L ${br.x} ${br.y} L ${bl.x} ${bl.y} Z`}
                   className="scale-move-hit"
                   onPointerDown={(e) => {
                     if (spaceDown) return;
@@ -1618,67 +2390,73 @@ const App = () => {
                     setDrag({
                       kind: 'move',
                       pathIndex: selectedPath,
-                      affectAll: transformAllPaths,
+                      affectAll: transformAllPaths || selectedPaths.length > 1,
+                      targetPathIndices: transformTargetIndices,
                       startPos,
                       baseShapes: cloneShapes(shapes),
                     });
                     e.currentTarget.setPointerCapture(e.pointerId);
                   }}
                 />
-                <rect
-                  x={transformBounds.minX}
-                  y={transformBounds.minY}
-                  width={Math.max(1, transformBounds.maxX - transformBounds.minX)}
-                  height={Math.max(1, transformBounds.maxY - transformBounds.minY)}
+                <path
+                  d={`M ${tl.x} ${tl.y} L ${tr.x} ${tr.y} L ${br.x} ${br.y} L ${bl.x} ${bl.y} Z`}
                   className="scale-box"
+                  vectorEffect="non-scaling-stroke"
                 />
                 {(
                   [
                     {
                       corner: 'nw',
-                      x: transformBounds.minX,
-                      y: transformBounds.minY,
-                      ox: transformBounds.maxX,
-                      oy: transformBounds.maxY,
-                      cx: transformBounds.cx,
-                      cy: transformBounds.cy,
+                      x: b.minX,
+                      y: b.minY,
+                      ox: b.maxX,
+                      oy: b.maxY,
+                      cx: b.cx,
+                      cy: b.cy,
                     },
                     {
                       corner: 'ne',
-                      x: transformBounds.maxX,
-                      y: transformBounds.minY,
-                      ox: transformBounds.minX,
-                      oy: transformBounds.maxY,
-                      cx: transformBounds.cx,
-                      cy: transformBounds.cy,
+                      x: b.maxX,
+                      y: b.minY,
+                      ox: b.minX,
+                      oy: b.maxY,
+                      cx: b.cx,
+                      cy: b.cy,
                     },
                     {
                       corner: 'se',
-                      x: transformBounds.maxX,
-                      y: transformBounds.maxY,
-                      ox: transformBounds.minX,
-                      oy: transformBounds.minY,
-                      cx: transformBounds.cx,
-                      cy: transformBounds.cy,
+                      x: b.maxX,
+                      y: b.maxY,
+                      ox: b.minX,
+                      oy: b.minY,
+                      cx: b.cx,
+                      cy: b.cy,
                     },
                     {
                       corner: 'sw',
-                      x: transformBounds.minX,
-                      y: transformBounds.maxY,
-                      ox: transformBounds.maxX,
-                      oy: transformBounds.minY,
-                      cx: transformBounds.cx,
-                      cy: transformBounds.cy,
+                      x: b.minX,
+                      y: b.maxY,
+                      ox: b.maxX,
+                      oy: b.minY,
+                      cx: b.cx,
+                      cy: b.cy,
                     },
                   ] as const
                 ).map((h) => (
+                  (() => {
+                    const rp = rot({ x: h.x, y: h.y });
+                    const ro = rot({ x: h.ox, y: h.oy });
+                    const rc = rot({ x: h.cx, y: h.cy });
+                    return (
                   <rect
                     key={h.corner}
-                    x={h.x - 5}
-                    y={h.y - 5}
-                    width={10}
-                    height={10}
-                    className={`scale-handle ${h.corner}`}
+                    x={rp.x - 2 / zoom}
+                    y={rp.y - 2 / zoom}
+                    width={4 / zoom}
+                    height={4 / zoom}
+                    className={`scale-handle ${h.corner}${drag?.kind === 'scale' ? ' active' : ''}`}
+                    style={{ strokeWidth: 1.1 / zoom }}
+                    vectorEffect="non-scaling-stroke"
                     onPointerDown={(e) => {
                       if (spaceDown) return;
                       e.stopPropagation();
@@ -1686,32 +2464,154 @@ const App = () => {
                       setDrag({
                         kind: 'scale',
                         pathIndex: selectedPath,
-                        affectAll: transformAllPaths,
-                        originOpp: { x: h.ox, y: h.oy },
-                        originCenter: { x: h.cx, y: h.cy },
-                        startVecOpp: { x: h.x - h.ox, y: h.y - h.oy },
-                        startVecCenter: { x: h.x - h.cx, y: h.y - h.cy },
+                        affectAll: transformAllPaths || selectedPaths.length > 1,
+                        targetPathIndices: transformTargetIndices,
+                        axis: 'both',
+                        originOpp: ro,
+                        originCenter: rc,
+                        startVecOpp: { x: rp.x - ro.x, y: rp.y - ro.y },
+                        startVecCenter: { x: rp.x - rc.x, y: rp.y - rc.y },
                         baseShapes: cloneShapes(shapes),
                       });
                       e.currentTarget.setPointerCapture(e.pointerId);
                     }}
                   />
+                    );
+                  })()
                 ))}
-                <circle cx={transformBounds.cx} cy={transformBounds.cy} r={3.2} className="scale-pivot" />
+                {(
+                  [
+                    {
+                      edge: 'n',
+                      x: b.cx,
+                      y: b.minY,
+                      ox: b.cx,
+                      oy: b.maxY,
+                      cx: b.cx,
+                      cy: b.cy,
+                      axis: 'y' as const,
+                    },
+                    {
+                      edge: 'e',
+                      x: b.maxX,
+                      y: b.cy,
+                      ox: b.minX,
+                      oy: b.cy,
+                      cx: b.cx,
+                      cy: b.cy,
+                      axis: 'x' as const,
+                    },
+                    {
+                      edge: 's',
+                      x: b.cx,
+                      y: b.maxY,
+                      ox: b.cx,
+                      oy: b.minY,
+                      cx: b.cx,
+                      cy: b.cy,
+                      axis: 'y' as const,
+                    },
+                    {
+                      edge: 'w',
+                      x: b.minX,
+                      y: b.cy,
+                      ox: b.maxX,
+                      oy: b.cy,
+                      cx: b.cx,
+                      cy: b.cy,
+                      axis: 'x' as const,
+                    },
+                  ] as const
+                ).map((h) => (
+                  (() => {
+                    const rp = rot({ x: h.x, y: h.y });
+                    const ro = rot({ x: h.ox, y: h.oy });
+                    const rc = rot({ x: h.cx, y: h.cy });
+                    return (
+                  <rect
+                    key={h.edge}
+                    x={rp.x - 2 / zoom}
+                    y={rp.y - 2 / zoom}
+                    width={4 / zoom}
+                    height={4 / zoom}
+                    className={`scale-handle ${h.edge}${drag?.kind === 'scale' ? ' active' : ''}`}
+                    style={{ strokeWidth: 1.1 / zoom }}
+                    vectorEffect="non-scaling-stroke"
+                    onPointerDown={(e) => {
+                      if (spaceDown) return;
+                      e.stopPropagation();
+                      pushUndo();
+                      setDrag({
+                        kind: 'scale',
+                        pathIndex: selectedPath,
+                        affectAll: transformAllPaths || selectedPaths.length > 1,
+                        targetPathIndices: transformTargetIndices,
+                        axis: h.axis,
+                        originOpp: ro,
+                        originCenter: rc,
+                        startVecOpp: { x: rp.x - ro.x, y: rp.y - ro.y },
+                        startVecCenter: { x: rp.x - rc.x, y: rp.y - rc.y },
+                        baseShapes: cloneShapes(shapes),
+                      });
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    }}
+                  />
+                    );
+                  })()
+                ))}
                 <line
-                  x1={transformBounds.cx - 8}
-                  y1={transformBounds.cy}
-                  x2={transformBounds.cx + 8}
-                  y2={transformBounds.cy}
+                  x1={topMid.x}
+                  y1={topMid.y}
+                  x2={rotArmEnd.x}
+                  y2={rotArmEnd.y}
+                  className="scale-rotate-arm"
+                  vectorEffect="non-scaling-stroke"
+                />
+                <circle
+                  cx={rotHandle.x}
+                  cy={rotHandle.y}
+                  r={3 / zoom}
+                  className={`scale-rotate-handle${drag?.kind === 'rotate' ? ' active' : ''}`}
+                  vectorEffect="non-scaling-stroke"
+                  onPointerDown={(e) => {
+                    if (spaceDown) return;
+                    e.stopPropagation();
+                    pushUndo();
+                    const svg = e.currentTarget.ownerSVGElement;
+                    if (!svg) return;
+                    const startPos = toLocal(e.clientX, e.clientY, svg);
+                    setDrag({
+                      kind: 'rotate',
+                      pathIndex: selectedPath,
+                      affectAll: transformAllPaths || selectedPaths.length > 1,
+                      targetPathIndices: transformTargetIndices,
+                      originCenter: { x: b.cx, y: b.cy },
+                      startAngle: Math.atan2(startPos.y - b.cy, startPos.x - b.cx),
+                      baseShapes: cloneShapes(shapes),
+                    });
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                  }}
+                />
+                <circle cx={b.cx} cy={b.cy} r={3.2 / zoom} className="scale-pivot" vectorEffect="non-scaling-stroke" />
+                <line
+                  x1={axisX1.x}
+                  y1={axisX1.y}
+                  x2={axisX2.x}
+                  y2={axisX2.y}
                   className="scale-pivot-line"
+                  vectorEffect="non-scaling-stroke"
                 />
                 <line
-                  x1={transformBounds.cx}
-                  y1={transformBounds.cy - 8}
-                  x2={transformBounds.cx}
-                  y2={transformBounds.cy + 8}
+                  x1={axisY1.x}
+                  y1={axisY1.y}
+                  x2={axisY2.x}
+                  y2={axisY2.y}
                   className="scale-pivot-line"
+                  vectorEffect="non-scaling-stroke"
                 />
+                    </>
+                  );
+                })()}
               </>
             ) : null}
 
@@ -1781,7 +2681,9 @@ const App = () => {
           }}
           onPointerUp={() => setPaneDrag(null)}
           onPointerCancel={() => setPaneDrag(null)}
-        />
+        >
+          <GripVertical className="splitter-grip" />
+        </div>
 
         <aside className="right-pane">
           <div className="code-header">
@@ -1798,6 +2700,7 @@ const App = () => {
               dangerouslySetInnerHTML={{ __html: `${highlightedCodeHtml}\n` }}
             />
             <textarea
+              id="live-svg-code"
               value={codeText}
               onChange={(e) => {
                 const next = e.target.value;
@@ -1805,7 +2708,7 @@ const App = () => {
                 setCodeError('');
                 if (codeDebounceRef.current) window.clearTimeout(codeDebounceRef.current);
                 codeDebounceRef.current = window.setTimeout(() => {
-                  applyCodeText(next);
+                  applyCodeText(next, true);
                 }, 280);
               }}
               onClick={(e) => syncSelectionFromCodeCursor(e.currentTarget)}
@@ -1816,14 +2719,8 @@ const App = () => {
                 const parsed = parseSvg(pasted);
                 if (parsed) {
                   e.preventDefault();
-                  pushUndo();
-                  setDocViewBox(parsed.viewBox);
-                  setShapes(parsed.shapes);
-                  setSelectedPath(0);
-                  setSelectedPaths([0]);
-                  setSelectedPoint(0);
-                  setSelectedPoints([0]);
-                  setCodeError('');
+                  setCodeText(pasted);
+                  applyCodeText(pasted, true);
                 }
               }}
               onScroll={(e) => {
@@ -1834,9 +2731,172 @@ const App = () => {
               spellCheck={false}
             />
           </div>
-          {codeError ? <p className="error">{codeError}</p> : null}
+          <p className="error">{codeError || '\u00A0'}</p>
         </aside>
       </div>
+      {pathMetaMenu ? (
+        <form
+          ref={pathMetaMenuRef}
+          className="path-meta-menu"
+          style={{ left: `${pathMetaMenu.x}px`, top: `${pathMetaMenu.y}px` }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onSubmit={(e) => {
+            e.preventDefault();
+            applyPathMetaMenu();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setPathMetaMenu(null);
+            }
+          }}
+        >
+          <h3>Path Attributes</h3>
+          <label>
+            ID
+            <input
+              value={pathMetaMenu.idValue}
+              onChange={(e) => setPathMetaMenu((m) => (m ? { ...m, idValue: e.target.value } : m))}
+              placeholder="optional"
+            />
+          </label>
+          <label>
+            Class
+            <input
+              value={pathMetaMenu.classValue}
+              onChange={(e) => setPathMetaMenu((m) => (m ? { ...m, classValue: e.target.value } : m))}
+              placeholder="optional"
+            />
+          </label>
+          <div className="path-meta-actions">
+            <button className="control-btn" type="button" onClick={() => setPathMetaMenu(null)}>
+              Cancel
+            </button>
+            <button className="control-btn" type="submit">
+              Save
+            </button>
+          </div>
+        </form>
+      ) : null}
+      {shapeMenu ? (
+        <div
+          ref={shapeMenuRef}
+          className="shape-menu"
+          style={{ left: `${shapeMenu.x}px`, top: `${shapeMenu.y}px` }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button className="shape-preset-btn" title="Circle" onClick={() => addPresetPath('circle')}>
+            <Circle />
+          </button>
+          <button className="shape-preset-btn" title="Curved Square" onClick={() => addPresetPath('roundedSquare')}>
+            <Square />
+          </button>
+          <button className="shape-preset-btn" title="Curved Diamond" onClick={() => addPresetPath('roundedDiamond')}>
+            <Diamond />
+          </button>
+          <button className="shape-preset-btn" title="Curved Triangle" onClick={() => addPresetPath('roundedTriangle')}>
+            <Triangle />
+          </button>
+        </div>
+      ) : null}
+      {styleMenu ? (
+        <div
+          ref={styleMenuRef}
+          className="style-menu"
+          style={{ left: `${styleMenu.x}px`, top: `${styleMenu.y}px` }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {styleMenu.kind !== 'opacity' ? <h3>{styleMenu.kind === 'fill' ? 'Fill' : 'Stroke'}</h3> : null}
+          {styleMenu.kind === 'fill' ? (
+            <>
+              <label>
+                <HexAlphaColorPicker
+                  color={rgbaToHexAlpha(activeFill)}
+                  onChange={(hex) =>
+                    updateActiveStyle({
+                      fill: rgbaToCss(parseColorToRgba(hex, activeFill)),
+                    })
+                  }
+                />
+              </label>
+            </>
+          ) : null}
+          {styleMenu.kind === 'stroke' ? (
+            <>
+              <label>
+                <div className={strokeControlDisabled ? 'picker-wrap disabled-stroke' : 'picker-wrap'}>
+                  <HexAlphaColorPicker
+                    color={rgbaToHexAlpha(activeStroke)}
+                    onChange={(hex) =>
+                      updateActiveStyle({
+                        stroke: rgbaToCss(parseColorToRgba(hex, activeStroke)),
+                      })
+                    }
+                  />
+                </div>
+              </label>
+              <label>
+                <SliderInline
+                  label="Width"
+                  min={0}
+                  max={24}
+                  value={activePath.strokeWidth}
+                  unit="px"
+                  onChange={(v) => updateActiveStyle({ strokeWidth: Math.round(v) })}
+                />
+              </label>
+            </>
+          ) : null}
+          {styleMenu.kind === 'opacity' ? (
+            <label>
+              <SliderInline
+                label="Opacity"
+                min={0}
+                max={100}
+                value={Math.round((activePath.opacityExplicit ? activePath.opacity : 1) * 100)}
+                unit="%"
+                onChange={(v) => updateActiveStyle({ opacity: clamp(Math.round(v) / 100, 0, 1) })}
+              />
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+      {aboutOpen ? (
+        <div className="about-backdrop" onClick={() => setAboutOpen(false)}>
+          <div className="about-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="icon-btn about-close" type="button" onClick={() => setAboutOpen(false)} title="Close">
+              <X />
+            </button>
+            <div className="about-logo">
+              <span className="brand-b">B</span>
+              <span className="brand-z">z</span>
+            </div>
+            <div className="about-content">
+              <h3>Credits</h3>
+              <p>Created by Michael Watts.</p>
+              <p>Powered by React, Vite, Lucide, Material UI, and react-colorful.</p>
+              <h3>Usage License (MIT)</h3>
+              <p>
+                Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+                associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction,
+                including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
+                and/or sell copies of the Software.
+              </p>
+              <p>
+                The above copyright notice and this permission notice shall be included in all copies or substantial
+                portions of the Software.
+              </p>
+              <p>
+                THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+                INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+                NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+                OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+                CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
