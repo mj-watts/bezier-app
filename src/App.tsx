@@ -17,6 +17,9 @@ type PathShape = {
   fill: string;
   stroke: string;
   strokeWidth: number;
+  fillExplicit: boolean;
+  strokeExplicit: boolean;
+  strokeWidthExplicit: boolean;
   closed: boolean;
 };
 
@@ -24,6 +27,7 @@ type Tool = 'select' | 'pen' | 'scale';
 type Snapshot = {
   shapes: PathShape[];
   selectedPath: number;
+  selectedPaths: number[];
   selectedPoint: number;
   selectedPoints: number[];
   transformAllPaths: boolean;
@@ -63,6 +67,8 @@ type PenHover =
   | { kind: 'segment'; segmentIndex: number }
   | null;
 
+type ViewBox = { minX: number; minY: number; vbW: number; vbH: number };
+
 const width = 900;
 const height = 560;
 const MIN_ZOOM = 0.25;
@@ -73,6 +79,7 @@ const MERGE_MAX_STEP_DISTANCE = 18;
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 const uid = () => Math.random().toString(36).slice(2, 9);
+const INTERNAL_VIEWBOX: ViewBox = { minX: 0, minY: 0, vbW: width, vbH: height };
 
 const makePoint = (x: number, y: number): Point => ({
   id: uid(),
@@ -95,6 +102,9 @@ const defaultPath = (name: string): PathShape => ({
   fill: '#58a6ff55',
   stroke: '#79c0ff',
   strokeWidth: 3,
+  fillExplicit: true,
+  strokeExplicit: true,
+  strokeWidthExplicit: true,
   closed: true,
 });
 
@@ -110,20 +120,21 @@ const sampleBezier = (a: Vec, c1: Vec, c2: Vec, b: Vec, t: number): Vec => {
 
 const pathData = (points: Point[], closed: boolean): string => {
   if (!points.length) return '';
-  let d = `M ${points[0].p.x.toFixed(1)} ${points[0].p.y.toFixed(1)}`;
+  const fmt = (n: number) => Number(n.toFixed(4)).toString();
+  let d = `M ${fmt(points[0].p.x)} ${fmt(points[0].p.y)}`;
   for (let i = 1; i < points.length; i += 1) {
     const prev = points[i - 1];
     const curr = points[i];
     const c1 = prev.out ?? prev.p;
     const c2 = curr.in ?? curr.p;
-    d += ` C ${c1.x.toFixed(1)} ${c1.y.toFixed(1)}, ${c2.x.toFixed(1)} ${c2.y.toFixed(1)}, ${curr.p.x.toFixed(1)} ${curr.p.y.toFixed(1)}`;
+    d += ` C ${fmt(c1.x)} ${fmt(c1.y)}, ${fmt(c2.x)} ${fmt(c2.y)}, ${fmt(curr.p.x)} ${fmt(curr.p.y)}`;
   }
   if (closed && points.length > 1) {
     const last = points[points.length - 1];
     const first = points[0];
     const c1 = last.out ?? last.p;
     const c2 = first.in ?? first.p;
-    d += ` C ${c1.x.toFixed(1)} ${c1.y.toFixed(1)}, ${c2.x.toFixed(1)} ${c2.y.toFixed(1)}, ${first.p.x.toFixed(1)} ${first.p.y.toFixed(1)} Z`;
+    d += ` C ${fmt(c1.x)} ${fmt(c1.y)}, ${fmt(c2.x)} ${fmt(c2.y)}, ${fmt(first.p.x)} ${fmt(first.p.y)} Z`;
   }
   return d;
 };
@@ -208,43 +219,28 @@ const smoothSharpCorners = (path: PathShape): PathShape => {
     out: pt.out ? { ...pt.out } : null,
   }));
 
-  const norm = (x: number, y: number) => {
-    const l = Math.hypot(x, y) || 1;
-    return { x: x / l, y: y / l, l };
-  };
-
   for (let i = 0; i < n; i += 1) {
     const curr = points[i];
-    const prev = path.closed ? points[(i - 1 + n) % n] : points[Math.max(0, i - 1)];
-    const next = path.closed ? points[(i + 1) % n] : points[Math.min(n - 1, i + 1)];
+    // Keep endpoints unchanged on open paths to avoid shape drift.
+    if (!path.closed && (i === 0 || i === n - 1)) continue;
+    if (!curr.in || !curr.out) continue;
 
-    if (!path.closed && i === 0) {
-      curr.in = curr.in ?? null;
-      continue;
-    }
+    // Preserve lengths and anchor position; only align tangent direction.
+    const inVec = { x: curr.p.x - curr.in.x, y: curr.p.y - curr.in.y }; // into-anchor direction
+    const outVec = { x: curr.out.x - curr.p.x, y: curr.out.y - curr.p.y }; // out-of-anchor direction
+    const inLen = Math.hypot(inVec.x, inVec.y);
+    const outLen = Math.hypot(outVec.x, outVec.y);
+    if (inLen < 0.0001 || outLen < 0.0001) continue;
 
-    if (!path.closed && i === n - 1) {
-      curr.out = curr.out ?? null;
-      continue;
-    }
+    const uIn = { x: inVec.x / inLen, y: inVec.y / inLen };
+    const uOut = { x: outVec.x / outLen, y: outVec.y / outLen };
+    const tan = { x: uIn.x + uOut.x, y: uIn.y + uOut.y };
+    const tanLen = Math.hypot(tan.x, tan.y);
+    if (tanLen < 0.0001) continue;
 
-    const vin = norm(curr.p.x - prev.p.x, curr.p.y - prev.p.y);
-    const vout = norm(next.p.x - curr.p.x, next.p.y - curr.p.y);
-    const dot = clamp(vin.x * vout.x + vin.y * vout.y, -1, 1);
-    const cornerDeg = (Math.acos(-dot) * 180) / Math.PI; // 180=straight, lower=sharper
-    if (cornerDeg > 150) continue; // already smooth-ish; leave as-is
-
-    const tx = vin.x + vout.x;
-    const ty = vin.y + vout.y;
-    const tn = norm(tx, ty);
-
-    // Sharper corner => a bit longer handles; bounded to preserve local shape.
-    const sharpness = clamp((150 - cornerDeg) / 120, 0.12, 0.75);
-    const base = Math.min(vin.l, vout.l);
-    const h = Math.min(36, base * 0.35 * sharpness);
-
-    curr.in = { x: curr.p.x - tn.x * h, y: curr.p.y - tn.y * h };
-    curr.out = { x: curr.p.x + tn.x * h, y: curr.p.y + tn.y * h };
+    const t = { x: tan.x / tanLen, y: tan.y / tanLen };
+    curr.in = { x: curr.p.x - t.x * inLen, y: curr.p.y - t.y * inLen };
+    curr.out = { x: curr.p.x + t.x * outLen, y: curr.p.y + t.y * outLen };
   }
 
   return { ...path, points };
@@ -289,15 +285,49 @@ const closestSegment = (path: PathShape, pos: Vec) => {
   return best;
 };
 
-const serializeSvg = (shapes: PathShape[]) => {
+const getContainMap = (vb: ViewBox) => {
+  const s = Math.min(width / vb.vbW, height / vb.vbH);
+  const ox = (width - vb.vbW * s) / 2;
+  const oy = (height - vb.vbH * s) / 2;
+  return { s, ox, oy };
+};
+
+const mapPointToViewBox = (p: Vec, vb: ViewBox): Vec => {
+  const { s, ox, oy } = getContainMap(vb);
+  return {
+    x: vb.minX + (p.x - ox) / s,
+    y: vb.minY + (p.y - oy) / s,
+  };
+};
+
+const mapShapesToViewBox = (shapes: PathShape[], vb: ViewBox) =>
+  shapes.map((shape) => ({
+    ...shape,
+    points: shape.points.map((pt) => ({
+      ...pt,
+      p: mapPointToViewBox(pt.p, vb),
+      in: pt.in ? mapPointToViewBox(pt.in, vb) : null,
+      out: pt.out ? mapPointToViewBox(pt.out, vb) : null,
+    })),
+  }));
+
+const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
+  const exportShapes = mapShapesToViewBox(shapes, vb);
   const lines = shapes
-    .map((shape) => {
-      const d = pathData(shape.points, shape.closed);
-      return `  <path d="${d}" fill="${shape.fill}" stroke="${shape.stroke}" stroke-width="${shape.strokeWidth}" />`;
+    .map((shape, i) => {
+      const exportShape = exportShapes[i];
+      if (!exportShape) return '';
+      const d = pathData(exportShape.points, exportShape.closed);
+      const attrs: string[] = [`d="${d}"`];
+      if (shape.fillExplicit) attrs.push(`fill="${shape.fill}"`);
+      if (shape.strokeExplicit) attrs.push(`stroke="${shape.stroke}"`);
+      if (shape.strokeWidthExplicit) attrs.push(`stroke-width="${shape.strokeWidth}"`);
+      return `  <path ${attrs.join(' ')} />`;
     })
+    .filter(Boolean)
     .join('\n');
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">\n${lines}\n</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.minX} ${vb.minY} ${vb.vbW} ${vb.vbH}">\n${lines}\n</svg>`;
 };
 
 const attr = (text: string, name: string) => {
@@ -416,10 +446,13 @@ const parseViewBox = (input: string) => {
   return { minX, minY, vbW, vbH };
 };
 
-const mapPointFromViewBox = (p: Vec, vb: { minX: number; minY: number; vbW: number; vbH: number }): Vec => ({
-  x: ((p.x - vb.minX) / vb.vbW) * width,
-  y: ((p.y - vb.minY) / vb.vbH) * height,
-});
+const mapPointFromViewBox = (p: Vec, vb: { minX: number; minY: number; vbW: number; vbH: number }): Vec => {
+  const { s, ox, oy } = getContainMap(vb);
+  return {
+    x: (p.x - vb.minX) * s + ox,
+    y: (p.y - vb.minY) * s + oy,
+  };
+};
 
 const mapShapesFromViewBox = (shapes: PathShape[], vb: { minX: number; minY: number; vbW: number; vbH: number }) =>
   shapes.map((shape) => ({
@@ -468,7 +501,7 @@ const autoFitShapesToViewport = (shapes: PathShape[]) => {
   }));
 };
 
-const parseSvg = (input: string): PathShape[] | null => {
+const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | null => {
   const pathMatches = [...input.matchAll(/<path\b[^>]*>/gi)].map((m) => m[0]);
   if (!pathMatches.length) return null;
 
@@ -482,17 +515,24 @@ const parseSvg = (input: string): PathShape[] | null => {
     if (!parsed) continue;
 
     const fill = attr(p, 'fill') ?? '#58a6ff55';
-    const stroke = attr(p, 'stroke') ?? '#79c0ff';
-    const sw = Number(attr(p, 'stroke-width') ?? '3');
+    const stroke = attr(p, 'stroke') ?? '#000000';
+    const swAttr = attr(p, 'stroke-width');
+    const sw = Number(swAttr ?? '1');
+    const fillExplicit = attr(p, 'fill') !== null;
+    const strokeExplicit = attr(p, 'stroke') !== null;
+    const strokeWidthExplicit = swAttr !== null;
 
     shapes.push({
       id: uid(),
       name: `Path ${k + 1}`,
       points: parsed.points,
       closed: parsed.closed,
-      fill,
+      fill: fillExplicit ? fill : '#000000',
       stroke,
       strokeWidth: Number.isFinite(sw) ? sw : 3,
+      fillExplicit,
+      strokeExplicit,
+      strokeWidthExplicit,
     });
   }
 
@@ -500,7 +540,7 @@ const parseSvg = (input: string): PathShape[] | null => {
 
   const vb = parseViewBox(input);
   const mapped = vb ? mapShapesFromViewBox(shapes, vb) : shapes;
-  return autoFitShapesToViewport(mapped);
+  return { shapes: vb ? mapped : autoFitShapesToViewport(mapped), viewBox: vb ?? INTERNAL_VIEWBOX };
 };
 
 const escapeHtml = (s: string) =>
@@ -537,6 +577,7 @@ const App = () => {
   const [drag, setDrag] = useState<DragTarget>(null);
   const [shapes, setShapes] = useState<PathShape[]>([defaultPath('Path 1')]);
   const [selectedPath, setSelectedPath] = useState(0);
+  const [selectedPaths, setSelectedPaths] = useState<number[]>([0]);
   const [pathSelected, setPathSelected] = useState(true);
   const [selectedPoint, setSelectedPoint] = useState(0);
   const [selectedPoints, setSelectedPoints] = useState<number[]>([0]);
@@ -553,6 +594,8 @@ const App = () => {
   const [codeError, setCodeError] = useState('');
   const [undoStack, setUndoStack] = useState<Snapshot[]>([]);
   const [redoStack, setRedoStack] = useState<Snapshot[]>([]);
+  const [marquee, setMarquee] = useState<{ start: Vec; current: Vec } | null>(null);
+  const [docViewBox, setDocViewBox] = useState<ViewBox>(INTERNAL_VIEWBOX);
   const [copied, setCopied] = useState(false);
   const codeOverlayRef = useRef<HTMLPreElement | null>(null);
   const codeDebounceRef = useRef<number | null>(null);
@@ -573,12 +616,13 @@ const App = () => {
   );
 
   useEffect(() => {
-    setCodeText(serializeSvg(shapes));
-  }, [shapes]);
+    setCodeText(serializeSvg(shapes, docViewBox));
+  }, [shapes, docViewBox]);
 
   const snapshotCurrent = (): Snapshot => ({
     shapes: cloneShapes(shapes),
     selectedPath,
+    selectedPaths,
     selectedPoint,
     selectedPoints,
     transformAllPaths,
@@ -588,6 +632,7 @@ const App = () => {
   const applySnapshot = (shot: Snapshot) => {
     setShapes(cloneShapes(shot.shapes));
     setSelectedPath(shot.selectedPath);
+    setSelectedPaths(shot.selectedPaths);
     setSelectedPoint(shot.selectedPoint);
     setSelectedPoints(shot.selectedPoints);
     setTransformAllPaths(shot.transformAllPaths);
@@ -665,6 +710,15 @@ const App = () => {
         e.preventDefault();
         redo();
       }
+      if ((e.metaKey || e.ctrlKey) && key === 'a') {
+        e.preventDefault();
+        if (!shapes.length) return;
+        setPathSelected(true);
+        setSelectedPaths(shapes.map((_, i) => i));
+        setSelectedPath(0);
+        setSelectedPoint(0);
+        setSelectedPoints([0]);
+      }
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
@@ -680,7 +734,7 @@ const App = () => {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, []);
+  }, [shapes]);
 
   const updatePath = (pathIndex: number, mutator: (path: PathShape) => PathShape) => {
     setShapes((curr) => curr.map((path, i) => (i === pathIndex ? mutator(path) : path)));
@@ -762,13 +816,21 @@ const App = () => {
   };
 
   const toLocal = (clientX: number, clientY: number, target: SVGSVGElement): Vec => {
+    const ctm = target.getScreenCTM();
+    if (ctm) {
+      const pt = target.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      const local = pt.matrixTransform(ctm.inverse());
+      return { x: local.x, y: local.y };
+    }
+
     const rect = target.getBoundingClientRect();
     const vw = width / zoom;
     const vh = height / zoom;
-    return {
-      x: viewOrigin.x + ((clientX - rect.left) / rect.width) * vw,
-      y: viewOrigin.y + ((clientY - rect.top) / rect.height) * vh,
-    };
+    const nx = clamp((clientX - rect.left) / rect.width, 0, 1);
+    const ny = clamp((clientY - rect.top) / rect.height, 0, 1);
+    return { x: viewOrigin.x + nx * vw, y: viewOrigin.y + ny * vh };
   };
 
   const pathDs = useMemo(() => shapes.map((shape) => pathData(shape.points, shape.closed)), [shapes]);
@@ -925,6 +987,11 @@ const App = () => {
       }
     }
 
+    if (marquee) {
+      setMarquee((m) => (m ? { ...m, current: pos } : m));
+      return;
+    }
+
     if (!drag) return;
 
     if (drag.kind === 'viewportPan') {
@@ -1031,6 +1098,7 @@ const App = () => {
 
   const onCanvasClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (spaceDown) return;
+    if (marquee) return;
     if (tool !== 'pen' || !activePath) return;
     const pos = toLocal(e.clientX, e.clientY, e.currentTarget);
 
@@ -1052,8 +1120,10 @@ const App = () => {
     }
     if (fromUser) pushUndo();
     setCodeError('');
-    setShapes(parsed);
+    setDocViewBox(parsed.viewBox);
+    setShapes(parsed.shapes);
     setSelectedPath(0);
+    setSelectedPaths([0]);
     setPathSelected(true);
     setSelectedPoint(0);
     setSelectedPoints([0]);
@@ -1061,7 +1131,13 @@ const App = () => {
 
   const updateActiveStyle = (patch: Partial<Pick<PathShape, 'fill' | 'stroke' | 'strokeWidth' | 'closed'>>) => {
     pushUndo();
-    updatePath(selectedPath, (path) => ({ ...path, ...patch }));
+    updatePath(selectedPath, (path) => ({
+      ...path,
+      ...patch,
+      fillExplicit: patch.fill !== undefined ? true : path.fillExplicit,
+      strokeExplicit: patch.stroke !== undefined ? true : path.strokeExplicit,
+      strokeWidthExplicit: patch.strokeWidth !== undefined ? true : path.strokeWidthExplicit,
+    }));
   };
 
   const syncSelectionFromCodeCursor = (el: HTMLTextAreaElement) => {
@@ -1072,6 +1148,7 @@ const App = () => {
     if (idx === selectedPath) return;
     setPathSelected(true);
     setSelectedPath(idx);
+    setSelectedPaths([idx]);
     setSelectedPoint(0);
     setSelectedPoints([0]);
   };
@@ -1098,6 +1175,7 @@ const App = () => {
               onClick={() => {
                 setPathSelected(true);
                 setSelectedPath(i);
+                setSelectedPaths([i]);
                 setSelectedPoint(0);
                 setSelectedPoints([0]);
               }}
@@ -1292,17 +1370,82 @@ const App = () => {
             }}
             onClick={onCanvasClick}
           >
+            <defs>
+              <pattern id="grid-small" width="24" height="24" patternUnits="userSpaceOnUse">
+                <path d="M 24 0 L 0 0 0 24" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+              </pattern>
+              <pattern id="grid-large" width="120" height="120" patternUnits="userSpaceOnUse">
+                <rect width="120" height="120" fill="url(#grid-small)" />
+                <path d="M 120 0 L 0 0 0 120" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
+              </pattern>
+            </defs>
             <rect
-              x={0}
-              y={0}
-              width={width}
-              height={height}
+              x={-WORLD_LIMIT}
+              y={-WORLD_LIMIT}
+              width={WORLD_LIMIT * 2}
+              height={WORLD_LIMIT * 2}
               className="grid-bg"
+              fill="url(#grid-large)"
               onPointerDown={(e) => {
                 if (spaceDown) return;
                 e.stopPropagation();
-                setPathSelected(false);
-                setSelectedPoints([]);
+                if (tool !== 'select') {
+                  setPathSelected(false);
+                  setSelectedPaths([]);
+                  setSelectedPoints([]);
+                  return;
+                }
+                const svg = e.currentTarget.ownerSVGElement;
+                if (!svg) return;
+                const start = toLocal(e.clientX, e.clientY, svg);
+                setMarquee({ start, current: start });
+                e.currentTarget.setPointerCapture(e.pointerId);
+              }}
+              onPointerMove={(e) => {
+                if (!marquee) return;
+                const svg = e.currentTarget.ownerSVGElement;
+                if (!svg) return;
+                const current = toLocal(e.clientX, e.clientY, svg);
+                setMarquee((m) => (m ? { ...m, current } : m));
+              }}
+              onPointerUp={() => {
+                if (!marquee) return;
+                const minX = Math.min(marquee.start.x, marquee.current.x);
+                const maxX = Math.max(marquee.start.x, marquee.current.x);
+                const minY = Math.min(marquee.start.y, marquee.current.y);
+                const maxY = Math.max(marquee.start.y, marquee.current.y);
+                const w = maxX - minX;
+                const h = maxY - minY;
+
+                if (w < 2 && h < 2) {
+                  setPathSelected(false);
+                  setSelectedPaths([]);
+                  setSelectedPoints([]);
+                  setMarquee(null);
+                  return;
+                }
+
+                const hits = shapes
+                  .map((shape, i) => ({ i, b: getPathBounds(shape.points) }))
+                  .filter(({ b }) => b !== null)
+                  .filter(({ b }) => {
+                    if (!b) return false;
+                    return !(b.maxX < minX || b.minX > maxX || b.maxY < minY || b.minY > maxY);
+                  })
+                  .map(({ i }) => i);
+
+                if (hits.length) {
+                  setPathSelected(true);
+                  setSelectedPaths(hits);
+                  setSelectedPath(hits[0]);
+                  setSelectedPoint(0);
+                  setSelectedPoints([0]);
+                } else {
+                  setPathSelected(false);
+                  setSelectedPaths([]);
+                  setSelectedPoints([]);
+                }
+                setMarquee(null);
               }}
             />
 
@@ -1310,33 +1453,50 @@ const App = () => {
               <path
                 key={shape.id}
                 d={pathDs[i]}
-                fill={shape.fill}
-                stroke={shape.stroke}
-                strokeWidth={shape.strokeWidth}
-                opacity={i === selectedPath ? 1 : 0.5}
-                onPointerDown={() => {
+                fill={shape.fillExplicit ? shape.fill : '#000000'}
+                stroke={shape.strokeExplicit ? shape.stroke : 'none'}
+                strokeWidth={shape.strokeWidthExplicit ? shape.strokeWidth : undefined}
+                opacity={!pathSelected ? 1 : selectedPaths.includes(i) ? 1 : 0.5}
+                onPointerDown={(e) => {
                   if (!spaceDown && (tool === 'select' || tool === 'scale')) {
                     setPathSelected(true);
-                    setSelectedPath(i);
-                    setSelectedPoint(0);
-                    setSelectedPoints([0]);
+                    if (e.shiftKey) {
+                      setSelectedPaths((curr) => {
+                        const exists = curr.includes(i);
+                        const next = exists ? curr.filter((v) => v !== i) : [...curr, i].sort((a, b) => a - b);
+                        const safe = next.length ? next : [i];
+                        setSelectedPath(safe[0]);
+                        setSelectedPoint(0);
+                        setSelectedPoints([0]);
+                        return safe;
+                      });
+                    } else {
+                      setSelectedPaths([i]);
+                      setSelectedPath(i);
+                      setSelectedPoint(0);
+                      setSelectedPoints([0]);
+                    }
                   }
                 }}
               />
             ))}
-            {pathSelected && activePath ? (
-              <path
-                d={pathDs[selectedPath]}
-                fill="none"
-                stroke="#ff9a00"
-                strokeWidth={1}
-                vectorEffect="non-scaling-stroke"
-                opacity={1}
-                pointerEvents="none"
-              />
-            ) : null}
+            {pathSelected
+              ? selectedPaths.map((idx) => (
+                  <path
+                    key={`sel-${shapes[idx]?.id ?? idx}`}
+                    d={pathDs[idx]}
+                    fill="none"
+                    stroke="#ff9a00"
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                    opacity={1}
+                    pointerEvents="none"
+                  />
+                ))
+              : null}
 
             {pathSelected &&
+              selectedPaths.length === 1 &&
               activePath.points.map((pt, i) => (
               <g key={pt.id}>
                 {tool === 'select' && i === selectedPoint && pt.in && (
@@ -1582,6 +1742,22 @@ const App = () => {
                 className="pen-add"
               />
             ) : null}
+
+            {marquee ? (
+              <rect
+                x={Math.min(marquee.start.x, marquee.current.x)}
+                y={Math.min(marquee.start.y, marquee.current.y)}
+                width={Math.abs(marquee.current.x - marquee.start.x)}
+                height={Math.abs(marquee.current.y - marquee.start.y)}
+                fill="none"
+                stroke="#ff9a00"
+                strokeWidth={1}
+                strokeDasharray="4 4"
+                opacity={0.8}
+                vectorEffect="non-scaling-stroke"
+                pointerEvents="none"
+              />
+            ) : null}
           </svg>
           <p className="hint">
             {tool === 'pen'
@@ -1641,8 +1817,10 @@ const App = () => {
                 if (parsed) {
                   e.preventDefault();
                   pushUndo();
-                  setShapes(parsed);
+                  setDocViewBox(parsed.viewBox);
+                  setShapes(parsed.shapes);
                   setSelectedPath(0);
+                  setSelectedPaths([0]);
                   setSelectedPoint(0);
                   setSelectedPoints([0]);
                   setCodeError('');
