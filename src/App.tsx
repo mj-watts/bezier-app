@@ -2863,13 +2863,24 @@ const App = () => {
       ) : null}
       {aboutOpen ? (
         <div className="about-backdrop" onClick={() => setAboutOpen(false)}>
-          <div className="about-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="icon-btn about-close" type="button" onClick={() => setAboutOpen(false)} title="Close">
+          <div className="about-modal" onClick={() => setAboutOpen(false)}>
+            <button
+              className="icon-btn about-close"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAboutOpen(false);
+              }}
+              title="Close"
+            >
               <X />
             </button>
             <div className="about-logo">
-              <span className="brand-b">B</span>
-              <span className="brand-z">z</span>
+              <span className="about-logo-mark">
+                <span className="brand-b">B</span>
+                <span className="brand-z">z</span>
+              </span>
+              <span className="about-logo-reveal">Bézier</span>
             </div>
             <div className="about-content">
               <h3>Credits</h3>

@@ -917,6 +917,7 @@ textarea {
 
 .about-modal {
   position: relative;
+  isolation: isolate;
   width: min(860px, calc(100vw - 32px));
   max-height: min(680px, calc(100vh - 32px));
   overflow: auto;
@@ -930,14 +931,34 @@ textarea {
   gap: 24px;
 }
 
+.about-modal::before {
+  --size: 4px;
+  --dot: 1px;
+  --color: color-mix(in hsl, currentColor, transparent 88%);
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(circle at center, var(--color) var(--dot), transparent var(--dot)) 0 0 / var(--size) var(--size);
+  mask: linear-gradient(-20deg, transparent 50%, white);
+}
+
+.about-modal > * {
+  position: relative;
+  z-index: 1;
+}
+
 .about-close {
   position: absolute;
   right: 10px;
   top: 10px;
+  z-index: 2;
 }
 
 .about-logo {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   border-right: 1px solid #2a3340;
@@ -948,6 +969,33 @@ textarea {
   white-space: nowrap;
   letter-spacing: 0.01em;
   font-size: clamp(4.4rem, 11vw, 7.5rem);
+}
+
+.about-logo-mark {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  width: 100%;
+}
+
+.about-logo-reveal {
+  width: 100%;
+  max-height: 0;
+  overflow: hidden;
+  text-align: center;
+  white-space: nowrap;
+  opacity: 0;
+  color: #ffc366;
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  letter-spacing: 0.04em;
+  transform: translateY(-6px);
+  transition: max-height 240ms ease, opacity 220ms ease, transform 240ms ease;
+}
+
+.about-logo:hover .about-logo-reveal {
+  max-height: 2em;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .about-content {
