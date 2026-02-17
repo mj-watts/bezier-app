@@ -2646,3 +2646,4 @@ const App = () => {
 };
 
 export default App;
+export { highlightSelectedPathHtml, parseSvg, pathIndexAtCaret, serializeSvg };
