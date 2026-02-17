@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/aboutmodal.tsx","./src/components/codepane.tsx","./src/components/controlsbar.tsx","./src/components/tooldock.tsx","./src/components/topbar.tsx"],"version":"5.9.3"}

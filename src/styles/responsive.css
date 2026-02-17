@@ -1,0 +1,39 @@
+@media (max-width: 1180px) {
+  .workspace {
+    grid-template-columns: 56px 1fr;
+    grid-template-rows: 1fr 320px;
+  }
+
+  .pane-splitter {
+    display: none;
+  }
+
+  .left-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--edge);
+  }
+
+  .right-pane {
+    grid-column: 1 / span 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .about-modal {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 18px;
+  }
+
+  .about-logo {
+    border-right: 0;
+    border-bottom: 1px solid #2a3340;
+    padding: 0 0 12px;
+    min-height: 0;
+    font-size: clamp(3.8rem, 16vw, 5.6rem);
+  }
+
+  .about-content {
+    padding-right: 0;
+  }
+}

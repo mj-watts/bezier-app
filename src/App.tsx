@@ -1,29 +1,12 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Circle,
-  Copy,
-  Diamond,
-  Expand,
-  MousePointer2,
-  PaintBucket,
-  PenLine,
-  PenTool,
-  Redo2,
-  SquareDashed,
-  Shapes,
-  Square,
-  Trash2,
-  Triangle,
-  Undo2,
-  GripVertical,
-  X,
-  WandSparkles,
-  Merge,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react';
+import { Circle, Diamond, Square, Triangle } from 'lucide-react';
 import MuiSlider from '@mui/material/Slider';
 import { HexAlphaColorPicker } from 'react-colorful';
+import AboutModal from './components/AboutModal';
+import CodePane from './components/CodePane';
+import ControlsBar from './components/ControlsBar';
+import ToolDock from './components/ToolDock';
+import TopBar from './components/TopBar';
 
 type Vec = { x: number; y: number };
 
@@ -1774,208 +1757,104 @@ const App = () => {
         setConfirmDeletePath(false);
       }}
     >
-      <header className="topbar">
-        <button className="brand-trigger" type="button" onClick={() => setAboutOpen(true)} title="About Bz">
-          <span className="brand-mark">
-            <span className="brand-b">B</span>
-            <span className="brand-insert">é</span>
-            <span className="brand-z">z</span>
-            <span className="brand-tail">ier</span>
-          </span>
-        </button>
-        <div className="path-tabs">
-          {shapes.map((shape, i) => (
-            <button
-              key={shape.id}
-              className={`${pathSelected && i === selectedPath ? 'tab active' : 'tab'}${pathMetaMenu?.pathIndex === i ? ' menu-open' : ''}`}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                const rect = e.currentTarget.getBoundingClientRect();
-                openPathMetaMenu(i, rect);
-              }}
-              onClick={() => {
-                const all = allPointIndicesForPath(i);
-                setPathSelected(true);
-                setSelectedPath(i);
-                setSelectedPaths([i]);
-                setSelectedPoint(all[0]);
-                setSelectedPoints(all);
-              }}
-            >
-              {shape.svgId.trim() || shape.name}
-            </button>
-          ))}
-          <button
-            ref={shapeTriggerRef}
-            className="icon-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              const rect = e.currentTarget.getBoundingClientRect();
-              const menuW = 208;
-              const menuH = 58;
-              const pad = 8;
-              const x = clamp(rect.left, pad, Math.max(pad, window.innerWidth - menuW - pad));
-              const y = clamp(rect.bottom + 6, pad, Math.max(pad, window.innerHeight - menuH - pad));
-              setShapeMenu({ x, y });
-              setStyleMenu(null);
-              setPathMetaMenu(null);
-            }}
-            title="Add Preset Shape"
-          >
-            <Shapes />
-          </button>
-          {!confirmDeletePath ? (
-            <button
-              className="icon-btn delete-path-btn"
-              disabled={!canDeletePath}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!canDeletePath) return;
-                setConfirmDeletePath(true);
-              }}
-              title="Delete Path"
-            >
-              <Trash2 />
-            </button>
-          ) : (
-            <>
-              <button
-                className="control-btn confirm-text"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deletePath();
-                  setConfirmDeletePath(false);
-                }}
-                title="Confirm Delete"
-              >
-                Confirm delete
-              </button>
-              <button
-                className="icon-btn confirm-no"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConfirmDeletePath(false);
-                }}
-                title="Cancel"
-              >
-                <X />
-              </button>
-            </>
-          )}
-        </div>
-      </header>
+      <TopBar
+        shapes={shapes.map((shape) => ({ id: shape.id, name: shape.name, svgId: shape.svgId }))}
+        pathSelected={pathSelected}
+        selectedPath={selectedPath}
+        pathMetaMenuPathIndex={pathMetaMenu?.pathIndex ?? null}
+        onOpenAbout={() => setAboutOpen(true)}
+        onPathDoubleClick={(pathIndex, rect) => openPathMetaMenu(pathIndex, rect)}
+        onPathClick={(pathIndex) => {
+          const all = allPointIndicesForPath(pathIndex);
+          setPathSelected(true);
+          setSelectedPath(pathIndex);
+          setSelectedPaths([pathIndex]);
+          setSelectedPoint(all[0]);
+          setSelectedPoints(all);
+        }}
+        shapeTriggerRef={shapeTriggerRef}
+        onOpenShapeMenu={(rect) => {
+          const menuW = 208;
+          const menuH = 58;
+          const pad = 8;
+          const x = clamp(rect.left, pad, Math.max(pad, window.innerWidth - menuW - pad));
+          const y = clamp(rect.bottom + 6, pad, Math.max(pad, window.innerHeight - menuH - pad));
+          setShapeMenu({ x, y });
+          setStyleMenu(null);
+          setPathMetaMenu(null);
+        }}
+        confirmDeletePath={confirmDeletePath}
+        canDeletePath={canDeletePath}
+        onRequestDelete={() => {
+          if (!canDeletePath) return;
+          setConfirmDeletePath(true);
+        }}
+        onConfirmDelete={() => {
+          deletePath();
+          setConfirmDeletePath(false);
+        }}
+        onCancelDelete={() => setConfirmDeletePath(false)}
+      />
 
       <div
         className="workspace"
         style={{ '--code-pane-width': `${codePaneWidth}px` } as CSSProperties}
       >
-        <aside className="tool-dock">
-          <button
-            className={tool === 'select' ? 'tool active' : 'tool'}
-            onClick={() => {
-              setTool('select');
-              setPenHover(null);
-            }}
-            title="Select Tool (V)"
-          >
-            <MousePointer2 />
-          </button>
-          <button className={tool === 'pen' ? 'tool active' : 'tool'} onClick={() => setTool('pen')} title="Pen Tool (P)">
-            <PenTool />
-          </button>
-          <button
-            className={tool === 'scale' ? 'tool active' : 'tool'}
-            onClick={() => {
-              setTool('scale');
-              setPenHover(null);
-            }}
-            title="Transform Tool (T)"
-          >
-            <Expand />
-          </button>
-          <div className="tool-divider" />
-          <button
-            ref={(el) => {
-              styleTriggerRefs.current[0] = el;
-            }}
-            className={styleMenu?.kind === 'fill' ? 'tool active' : 'tool'}
-            title="Fill"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (styleMenu?.kind === 'fill') setStyleMenu(null);
-              else openStyleMenu('fill', e.currentTarget.getBoundingClientRect());
-            }}
-          >
-            <PaintBucket />
-          </button>
-          <button
-            ref={(el) => {
-              styleTriggerRefs.current[1] = el;
-            }}
-            className={styleMenu?.kind === 'stroke' ? 'tool active' : 'tool'}
-            title="Stroke"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (styleMenu?.kind === 'stroke') setStyleMenu(null);
-              else openStyleMenu('stroke', e.currentTarget.getBoundingClientRect());
-            }}
-          >
-            <PenLine />
-          </button>
-          <button
-            ref={(el) => {
-              styleTriggerRefs.current[2] = el;
-            }}
-            className={styleMenu?.kind === 'opacity' ? 'tool active' : 'tool'}
-            title="Opacity"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (styleMenu?.kind === 'opacity') setStyleMenu(null);
-              else openStyleMenu('opacity', e.currentTarget.getBoundingClientRect());
-            }}
-          >
-            <SquareDashed />
-          </button>
-          <div className="tool-divider" />
-          <button
-            className="tool"
-            onClick={smoothPathOrSvg}
-            title={pathSelected ? 'Smooth Path' : 'Smooth SVG'}
-          >
-            <WandSparkles />
-          </button>
-          <button
-            className="tool"
-            onClick={mergeSelectedAnchors}
-            disabled={!pathSelected || selectedPoints.length < 2}
-            title="Merge Points"
-          >
-            <Merge />
-          </button>
-        </aside>
+        <ToolDock
+          tool={tool}
+          styleMenuKind={styleMenu?.kind ?? null}
+          setStyleTriggerRef={(index, el) => {
+            styleTriggerRefs.current[index] = el;
+          }}
+          onSelectTool={() => {
+            setTool('select');
+            setPenHover(null);
+          }}
+          onPenTool={() => setTool('pen')}
+          onScaleTool={() => {
+            setTool('scale');
+            setPenHover(null);
+          }}
+          onToggleStyleMenu={(kind, rect) => {
+            if (styleMenu?.kind === kind) setStyleMenu(null);
+            else openStyleMenu(kind, rect);
+          }}
+          onSmooth={smoothPathOrSvg}
+          onMerge={mergeSelectedAnchors}
+          canMerge={pathSelected && selectedPoints.length >= 2}
+          pathSelected={pathSelected}
+        />
 
         <section className="left-pane">
-          <div className="controls-row">
-            <button
-              className={`control-btn text-sm switch-btn${activePath.closed ? ' active' : ''}`}
-              type="button"
-              onClick={() => updateActiveStyle({ closed: !activePath.closed })}
-              aria-pressed={activePath.closed}
-              title="Closed"
-            >
-              <span className="switch-track" aria-hidden="true">
-                <span className="switch-thumb" />
-              </span>
-              <span>Closed</span>
-            </button>
-            <span className="control-group-divider" aria-hidden="true" />
-            <div className="control-group simplify-group">
+          <ControlsBar
+            closed={activePath.closed}
+            onToggleClosed={() => updateActiveStyle({ closed: !activePath.closed })}
+            onSimplify={simplifyPathOrSvg}
+            pathSelected={pathSelected}
+            tool={tool}
+            transformAllPaths={transformAllPaths}
+            onToggleTransformAllPaths={setTransformAllPaths}
+            showViewBox={showViewBox}
+            onToggleShowViewBox={() => setShowViewBox((v) => !v)}
+            zoom={zoom}
+            onZoomOut={() => {
+              if (selectedPathBounds) {
+                zoomByFactorCenteredOnWorld(1 / 1.2, selectedPathBounds.cx, selectedPathBounds.cy);
+              } else {
+                const { nx, ny } = zoomFocusFromSelection();
+                zoomByFactorAt(1 / 1.2, nx, ny);
+              }
+            }}
+            onZoomIn={() => {
+              const { nx, ny } = zoomFocusFromSelection();
+              zoomByFactorAt(1.2, nx, ny);
+            }}
+            onResetView={resetView}
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={undoStack.length > 0}
+            canRedo={redoStack.length > 0}
+            renderThresholdControl={
               <SliderInline
                 label="Simplify threshold"
                 min={2}
@@ -1983,87 +1862,8 @@ const App = () => {
                 value={simplifyThreshold}
                 onChange={(v) => setSimplifyThreshold(Math.round(v))}
               />
-              <button className="control-btn text-sm" type="button" onClick={simplifyPathOrSvg}>
-                {pathSelected ? 'Simplify Path' : 'Simplify SVG'}
-              </button>
-            </div>
-            {tool === 'scale' ? (
-              <label>
-                All Paths
-                <input
-                  type="checkbox"
-                  checked={transformAllPaths}
-                  onChange={(e) => setTransformAllPaths(e.target.checked)}
-                />
-              </label>
-            ) : null}
-            <div className="controls-actions">
-              <button
-                className={`control-btn text-sm switch-btn${showViewBox ? ' active' : ''}`}
-                type="button"
-                onClick={() => setShowViewBox((v) => !v)}
-                aria-pressed={showViewBox}
-                title="Show viewBox"
-              >
-                <span className="switch-track" aria-hidden="true">
-                  <span className="switch-thumb" />
-                </span>
-                <span>Show viewBox</span>
-              </button>
-              <span className="control-group-divider" aria-hidden="true" />
-              <div className="control-group">
-                <div className="zoom-controls">
-                  <button
-                    className="control-btn icon-only"
-                    type="button"
-                    onClick={() => {
-                      if (selectedPathBounds) {
-                        zoomByFactorCenteredOnWorld(1 / 1.2, selectedPathBounds.cx, selectedPathBounds.cy);
-                      } else {
-                        const { nx, ny } = zoomFocusFromSelection();
-                        zoomByFactorAt(1 / 1.2, nx, ny);
-                      }
-                    }}
-                    title="Zoom Out"
-                  >
-                    <ZoomOut />
-                  </button>
-                  <strong className="zoom-readout">{Math.round(zoom * 100)}%</strong>
-                  <button
-                    className="control-btn icon-only"
-                    type="button"
-                    onClick={() => {
-                      const { nx, ny } = zoomFocusFromSelection();
-                      zoomByFactorAt(1.2, nx, ny);
-                    }}
-                    title="Zoom In"
-                  >
-                    <ZoomIn />
-                  </button>
-                  <button className="control-btn text-sm" type="button" onClick={resetView} title="Reset View">
-                    100%
-                  </button>
-                </div>
-              </div>
-              <span className="control-group-divider" aria-hidden="true" />
-              <button
-                className="control-btn icon-only"
-                onClick={undo}
-                disabled={!undoStack.length}
-                title="Undo (Cmd/Ctrl+Z)"
-              >
-                <Undo2 />
-              </button>
-              <button
-                className="control-btn icon-only"
-                onClick={redo}
-                disabled={!redoStack.length}
-                title="Redo (Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y)"
-              >
-                <Redo2 />
-              </button>
-            </div>
-          </div>
+            }
+          />
 
           <svg
             ref={editorSvgRef}
@@ -2668,71 +2468,50 @@ const App = () => {
           </p>
         </section>
 
-        <div
-          className="pane-splitter"
-          onPointerDown={(e) => {
-            setPaneDrag({ startX: e.clientX, startWidth: codePaneWidth });
-            e.currentTarget.setPointerCapture(e.pointerId);
+        <CodePane
+          copied={copied}
+          onCopy={copySvgCode}
+          codeOverlayRef={codeOverlayRef}
+          highlightedCodeHtml={highlightedCodeHtml}
+          codeText={codeText}
+          codeError={codeError}
+          onCodeChange={(next) => {
+            setCodeText(next);
+            setCodeError('');
+            if (codeDebounceRef.current) window.clearTimeout(codeDebounceRef.current);
+            codeDebounceRef.current = window.setTimeout(() => {
+              applyCodeText(next, true);
+            }, 280);
           }}
-          onPointerMove={(e) => {
+          onCodeClick={(el) => syncSelectionFromCodeCursor(el)}
+          onCodeKeyUp={(el) => syncSelectionFromCodeCursor(el)}
+          onCodeSelect={(el) => syncSelectionFromCodeCursor(el)}
+          onCodePaste={(e) => {
+            const pasted = e.clipboardData.getData('text');
+            const parsed = parseSvg(pasted);
+            if (parsed) {
+              e.preventDefault();
+              setCodeText(pasted);
+              applyCodeText(pasted, true);
+            }
+          }}
+          onCodeScroll={(el) => {
+            if (!codeOverlayRef.current) return;
+            codeOverlayRef.current.scrollTop = el.scrollTop;
+            codeOverlayRef.current.scrollLeft = el.scrollLeft;
+          }}
+          paneDrag={paneDrag}
+          onPaneDragStart={(startX, splitter, pointerId) => {
+            setPaneDrag({ startX, startWidth: codePaneWidth });
+            splitter.setPointerCapture(pointerId);
+          }}
+          onPaneDragMove={(x) => {
             if (!paneDrag) return;
-            const dx = e.clientX - paneDrag.startX;
+            const dx = x - paneDrag.startX;
             setCodePaneWidth(clamp(paneDrag.startWidth - dx, 260, 860));
           }}
-          onPointerUp={() => setPaneDrag(null)}
-          onPointerCancel={() => setPaneDrag(null)}
-        >
-          <GripVertical className="splitter-grip" />
-        </div>
-
-        <aside className="right-pane">
-          <div className="code-header">
-            <h2>Live SVG</h2>
-            <button className="control-btn icon-only" onClick={copySvgCode} title={copied ? 'Copied' : 'Copy SVG'}>
-              <Copy />
-            </button>
-          </div>
-          <div className="code-wrap">
-            <pre
-              ref={codeOverlayRef}
-              className="code-overlay"
-              aria-hidden="true"
-              dangerouslySetInnerHTML={{ __html: `${highlightedCodeHtml}\n` }}
-            />
-            <textarea
-              id="live-svg-code"
-              value={codeText}
-              onChange={(e) => {
-                const next = e.target.value;
-                setCodeText(next);
-                setCodeError('');
-                if (codeDebounceRef.current) window.clearTimeout(codeDebounceRef.current);
-                codeDebounceRef.current = window.setTimeout(() => {
-                  applyCodeText(next, true);
-                }, 280);
-              }}
-              onClick={(e) => syncSelectionFromCodeCursor(e.currentTarget)}
-              onKeyUp={(e) => syncSelectionFromCodeCursor(e.currentTarget)}
-              onSelect={(e) => syncSelectionFromCodeCursor(e.currentTarget)}
-              onPaste={(e) => {
-                const pasted = e.clipboardData.getData('text');
-                const parsed = parseSvg(pasted);
-                if (parsed) {
-                  e.preventDefault();
-                  setCodeText(pasted);
-                  applyCodeText(pasted, true);
-                }
-              }}
-              onScroll={(e) => {
-                if (!codeOverlayRef.current) return;
-                codeOverlayRef.current.scrollTop = e.currentTarget.scrollTop;
-                codeOverlayRef.current.scrollLeft = e.currentTarget.scrollLeft;
-              }}
-              spellCheck={false}
-            />
-          </div>
-          <p className="error">{codeError || '\u00A0'}</p>
-        </aside>
+          onPaneDragEnd={() => setPaneDrag(null)}
+        />
       </div>
       {pathMetaMenu ? (
         <form
@@ -2861,53 +2640,7 @@ const App = () => {
           ) : null}
         </div>
       ) : null}
-      {aboutOpen ? (
-        <div className="about-backdrop" onClick={() => setAboutOpen(false)}>
-          <div className="about-modal" onClick={() => setAboutOpen(false)}>
-            <button
-              className="icon-btn about-close"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setAboutOpen(false);
-              }}
-              title="Close"
-            >
-              <X />
-            </button>
-            <div className="about-logo">
-              <span className="about-logo-mark">
-                <span className="brand-b">B</span>
-                <span className="brand-z">z</span>
-              </span>
-              <span className="about-logo-reveal">Bézier</span>
-            </div>
-            <div className="about-content">
-              <h3>Credits</h3>
-              <p>Created by Michael Watts.</p>
-              <p>Powered by React, Vite, Lucide, Material UI, and react-colorful.</p>
-              <h3>Usage License (MIT)</h3>
-              <p>
-                Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
-                associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction,
-                including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-                and/or sell copies of the Software.
-              </p>
-              <p>
-                The above copyright notice and this permission notice shall be included in all copies or substantial
-                portions of the Software.
-              </p>
-              <p>
-                THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-                INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-                NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
-                OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-                CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </div>
   );
 };
