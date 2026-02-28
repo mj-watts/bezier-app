@@ -42,6 +42,12 @@ textarea {
   grid-template-rows: auto 1fr;
 }
 
+.app-shell,
+.app-shell * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .topbar {
   border-bottom: 1px solid var(--edge);
   background: #11151b;
@@ -924,6 +930,8 @@ textarea {
   background: transparent;
   color: transparent;
   caret-color: #c9ddf4;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .code-wrap textarea:focus,
