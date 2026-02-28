@@ -1,5 +1,4 @@
-import { Check, Shapes, Trash2, X } from 'lucide-react';
-import { type RefObject } from 'react';
+import { Check, Trash2, X } from 'lucide-react';
 
 type ShapeTab = {
   id: string;
@@ -14,8 +13,6 @@ type Props = {
   pathMetaMenuPathIndex: number | null;
   onPathDoubleClick: (pathIndex: number, rect: DOMRect) => void;
   onPathClick: (pathIndex: number) => void;
-  shapeTriggerRef: RefObject<HTMLButtonElement | null>;
-  onOpenShapeMenu: (rect: DOMRect) => void;
   confirmDeletePath: boolean;
   canDeletePath: boolean;
   onRequestDelete: () => void;
@@ -30,8 +27,6 @@ const PathPane = ({
   pathMetaMenuPathIndex,
   onPathDoubleClick,
   onPathClick,
-  shapeTriggerRef,
-  onOpenShapeMenu,
   confirmDeletePath,
   canDeletePath,
   onRequestDelete,
@@ -43,18 +38,6 @@ const PathPane = ({
       <div className="paths-pane-header">
         <h2>Paths</h2>
         <div className="paths-pane-actions">
-          <button
-            ref={shapeTriggerRef}
-            className="icon-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenShapeMenu(e.currentTarget.getBoundingClientRect());
-            }}
-            title="Add Preset Shape"
-          >
-            <Shapes />
-          </button>
-
           {!confirmDeletePath ? (
             <button
               className="icon-btn delete-path-btn"

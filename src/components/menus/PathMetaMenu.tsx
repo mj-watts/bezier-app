@@ -1,0 +1,54 @@
+import { type RefObject } from 'react';
+import { type PathMetaMenuState } from '../../types/app-types';
+
+type Props = {
+  menu: PathMetaMenuState | null;
+  menuRef: RefObject<HTMLFormElement | null>;
+  onClose: () => void;
+  onApply: () => void;
+  onIdValueChange: (next: string) => void;
+  onClassValueChange: (next: string) => void;
+};
+
+const PathMetaMenu = ({ menu, menuRef, onClose, onApply, onIdValueChange, onClassValueChange }: Props) => {
+  if (!menu) return null;
+
+  return (
+    <form
+      ref={menuRef}
+      className="path-meta-menu"
+      style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onSubmit={(e) => {
+        e.preventDefault();
+        onApply();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+    >
+      <h3>Path Attributes</h3>
+      <label>
+        ID
+        <input autoFocus value={menu.idValue} onChange={(e) => onIdValueChange(e.target.value)} placeholder="optional" />
+      </label>
+      <label>
+        Class
+        <input value={menu.classValue} onChange={(e) => onClassValueChange(e.target.value)} placeholder="optional" />
+      </label>
+      <div className="path-meta-actions">
+        <button className="control-btn" type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="control-btn" type="submit">
+          Save
+        </button>
+      </div>
+    </form>
+  );
+};
+
+export default PathMetaMenu;

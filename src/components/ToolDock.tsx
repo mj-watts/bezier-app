@@ -1,5 +1,6 @@
-import { Expand, Merge, MousePointer2, PaintBucket, PenLine, PenTool, SquareDashed, WandSparkles } from 'lucide-react';
+import { Expand, Merge, MousePointer2, PaintBucket, PenLine, PenTool, Shapes, SquareDashed, WandSparkles } from 'lucide-react';
 import Tooltip from '@mui/material/Tooltip';
+import { type RefObject } from 'react';
 
 type Tool = 'select' | 'pen' | 'scale';
 type StylePanel = 'fill' | 'stroke' | 'opacity';
@@ -11,6 +12,8 @@ type Props = {
   onSelectTool: () => void;
   onPenTool: () => void;
   onScaleTool: () => void;
+  shapeTriggerRef: RefObject<HTMLButtonElement | null>;
+  onOpenShapeMenu: (rect: DOMRect) => void;
   onToggleStyleMenu: (kind: StylePanel, rect: DOMRect) => void;
   onSmooth: () => void;
   onMerge: () => void;
@@ -25,6 +28,8 @@ const ToolDock = ({
   onSelectTool,
   onPenTool,
   onScaleTool,
+  shapeTriggerRef,
+  onOpenShapeMenu,
   onToggleStyleMenu,
   onSmooth,
   onMerge,
@@ -46,6 +51,19 @@ const ToolDock = ({
       <Tooltip title="Transform Tool (T)" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
         <button className={tool === 'scale' ? 'tool active' : 'tool'} onClick={onScaleTool}>
           <Expand />
+        </button>
+      </Tooltip>
+      <Tooltip title="Add Preset Shape" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
+        <button
+          ref={shapeTriggerRef}
+          className="tool"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenShapeMenu(e.currentTarget.getBoundingClientRect());
+          }}
+        >
+          <Shapes />
         </button>
       </Tooltip>
       <div className="tool-divider" />
