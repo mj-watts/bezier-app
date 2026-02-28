@@ -554,7 +554,7 @@ const attr = (text: string, name: string) => {
 };
 
 const parsePathD = (d: string) => {
-  const tokens = (d.match(/[MLCZmlcz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []).map((t) => t.trim());
+  const tokens = (d.match(/[MLHVCZmlhvcz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []).map((t) => t.trim());
   if (!tokens.length) return null;
 
   const pts: Point[] = [];
@@ -572,7 +572,7 @@ const parsePathD = (d: string) => {
   };
 
   while (i < tokens.length) {
-    if (/^[MLCZmlcz]$/.test(tokens[i])) {
+    if (/^[MLHVCZmlhvcz]$/.test(tokens[i])) {
       const rawCmd = tokens[i];
       cmd = rawCmd.toUpperCase();
       rel = rawCmd !== cmd;
@@ -600,6 +600,26 @@ const parsePathD = (d: string) => {
       const y0 = readNum();
       if (x0 === null || y0 === null) break;
       const x = rel ? cursor.x + x0 : x0;
+      const y = rel ? cursor.y + y0 : y0;
+      pts.push({ id: uid(), p: { x, y }, in: null, out: null });
+      cursor = { x, y };
+      continue;
+    }
+
+    if (cmd === 'H') {
+      const x0 = readNum();
+      if (x0 === null) break;
+      const x = rel ? cursor.x + x0 : x0;
+      const y = cursor.y;
+      pts.push({ id: uid(), p: { x, y }, in: null, out: null });
+      cursor = { x, y };
+      continue;
+    }
+
+    if (cmd === 'V') {
+      const y0 = readNum();
+      if (y0 === null) break;
+      const x = cursor.x;
       const y = rel ? cursor.y + y0 : y0;
       pts.push({ id: uid(), p: { x, y }, in: null, out: null });
       cursor = { x, y };
@@ -661,6 +681,24 @@ const parseViewBox = (input: string) => {
   return { minX, minY, vbW, vbH };
 };
 
+const parseSvgRootStyleDefaults = (input: string) => {
+  const svgOpen = input.match(/<svg\b[^>]*>/i)?.[0];
+  if (!svgOpen) {
+    return {
+      fill: null as string | null,
+      stroke: null as string | null,
+      strokeWidth: null as string | null,
+      opacity: null as string | null,
+    };
+  }
+  return {
+    fill: attr(svgOpen, 'fill'),
+    stroke: attr(svgOpen, 'stroke'),
+    strokeWidth: attr(svgOpen, 'stroke-width'),
+    opacity: attr(svgOpen, 'opacity'),
+  };
+};
+
 const mapPointFromViewBox = (p: Vec, vb: { minX: number; minY: number; vbW: number; vbH: number }): Vec => {
   const { s, ox, oy } = getContainMap(vb);
   return {
@@ -719,6 +757,7 @@ const autoFitShapesToViewport = (shapes: PathShape[]) => {
 const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | null => {
   const pathMatches = [...input.matchAll(/<path\b[^>]*>/gi)].map((m) => m[0]);
   if (!pathMatches.length) return null;
+  const rootDefaults = parseSvgRootStyleDefaults(input);
 
   const shapes: PathShape[] = [];
 
@@ -729,16 +768,18 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
     const parsed = parsePathD(d);
     if (!parsed) continue;
 
-    const fill = attr(p, 'fill') ?? '#58a6ff55';
-    const stroke = attr(p, 'stroke') ?? '#000000';
-    const swAttr = attr(p, 'stroke-width');
+    const fillAttr = attr(p, 'fill') ?? rootDefaults.fill;
+    const strokeAttr = attr(p, 'stroke') ?? rootDefaults.stroke;
+    const swAttr = attr(p, 'stroke-width') ?? rootDefaults.strokeWidth;
     const sw = Number(swAttr ?? '1');
-    const opacityAttr = attr(p, 'opacity');
+    const opacityAttr = attr(p, 'opacity') ?? rootDefaults.opacity;
     const opacity = clamp(Number(opacityAttr ?? '1'), 0, 1);
     const svgId = attr(p, 'id') ?? '';
     const svgClass = attr(p, 'class') ?? '';
-    const fillExplicit = attr(p, 'fill') !== null;
-    const strokeExplicit = attr(p, 'stroke') !== null;
+    const fill = fillAttr ?? '#000000';
+    const stroke = strokeAttr ?? '#000000';
+    const fillExplicit = fillAttr !== null;
+    const strokeExplicit = strokeAttr !== null;
     const strokeWidthExplicit = swAttr !== null;
 
     shapes.push({
@@ -751,7 +792,7 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
       sourceD: d,
       geometryDirty: false,
       closed: parsed.closed,
-      fill: fillExplicit ? fill : '#000000',
+      fill,
       stroke,
       strokeWidth: Number.isFinite(sw) ? sw : 3,
       opacity: Number.isFinite(opacity) ? opacity : 1,
@@ -775,7 +816,7 @@ const escapeHtml = (s: string) =>
 const getSelectedAnchorRangesInD = (d: string, selectedPoints: number[]) => {
   const selected = new Set(selectedPoints);
   const tokens: Array<{ text: string; index: number; cmd: boolean }> = [];
-  const re = /[MLCZmlcz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g;
+  const re = /[MLHVCZmlhvcz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(d))) {
     const text = m[0];
@@ -818,6 +859,26 @@ const getSelectedAnchorRangesInD = (d: string, selectedPoints: number[]) => {
         out.push({ start: tokens[i + 1].index, end: tokens[i + 1].index + tokens[i + 1].text.length });
       }
       i += 2;
+      continue;
+    }
+
+    if (cmd === 'H') {
+      if (!isNum(i)) break;
+      pointIndex += 1;
+      if (selected.has(pointIndex)) {
+        out.push({ start: tokens[i].index, end: tokens[i].index + tokens[i].text.length });
+      }
+      i += 1;
+      continue;
+    }
+
+    if (cmd === 'V') {
+      if (!isNum(i)) break;
+      pointIndex += 1;
+      if (selected.has(pointIndex)) {
+        out.push({ start: tokens[i].index, end: tokens[i].index + tokens[i].text.length });
+      }
+      i += 1;
       continue;
     }
 
@@ -1596,7 +1657,7 @@ const App = () => {
   const applyCodeText = (text: string, fromUser = false) => {
     const parsed = parseSvg(text);
     if (!parsed) {
-      if (fromUser) setCodeError('Unable to parse SVG. Use <path> tags with M/L/C/Z commands.');
+      if (fromUser) setCodeError('Unable to parse SVG. Use <path> tags with M/L/H/V/C/Z commands.');
       return;
     }
     if (fromUser) pushUndo();

@@ -23,6 +23,28 @@ describe('SVG utils', () => {
     expect(parseSvg(invalid)).toBeNull();
   });
 
+  it('parseSvg supports H/V commands', () => {
+    const hvSvg = `<svg viewBox="0 0 10 10"><path d="M 1 1 H 9 V 9 H 1 Z" /></svg>`;
+    const parsed = parseSvg(hvSvg);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.shapes).toHaveLength(1);
+    expect(parsed?.shapes[0]?.points).toHaveLength(4);
+    expect(parsed?.shapes[0]?.closed).toBe(true);
+  });
+
+  it('parseSvg inherits root fill/stroke defaults', () => {
+    const inheritedSvg = `<svg viewBox="0 0 10 10" fill="none" stroke="#216979" stroke-width="0.5"><path d="M 1 1 H 9 V 9 H 1 Z" /></svg>`;
+    const parsed = parseSvg(inheritedSvg);
+    expect(parsed).not.toBeNull();
+    const first = parsed?.shapes[0];
+    expect(first?.fill).toBe('none');
+    expect(first?.fillExplicit).toBe(true);
+    expect(first?.stroke).toBe('#216979');
+    expect(first?.strokeExplicit).toBe(true);
+    expect(first?.strokeWidth).toBe(0.5);
+    expect(first?.strokeWidthExplicit).toBe(true);
+  });
+
   it('serializeSvg omits stroke attrs when stroke width is zero', () => {
     const parsed = parseSvg(sampleSvg);
     expect(parsed).not.toBeNull();
