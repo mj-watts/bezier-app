@@ -5,6 +5,7 @@ import { HexAlphaColorPicker } from 'react-colorful';
 import AboutModal from './components/AboutModal';
 import CodePane from './components/CodePane';
 import ControlsBar from './components/ControlsBar';
+import PathPane from './components/PathPane';
 import ToolDock from './components/ToolDock';
 import TopBar from './components/TopBar';
 
@@ -16,6 +17,9 @@ type Point = {
   in: Vec | null;
   out: Vec | null;
 };
+
+type StrokeLinecap = 'butt' | 'round' | 'square' | 'inherit';
+type StrokeLinejoin = 'miter' | 'round' | 'bevel' | 'inherit';
 
 type PathShape = {
   id: string;
@@ -29,10 +33,14 @@ type PathShape = {
   fill: string;
   stroke: string;
   strokeWidth: number;
+  strokeLinecap: StrokeLinecap;
+  strokeLinejoin: StrokeLinejoin;
   opacity: number;
   fillExplicit: boolean;
   strokeExplicit: boolean;
   strokeWidthExplicit: boolean;
+  strokeLinecapExplicit: boolean;
+  strokeLinejoinExplicit: boolean;
   opacityExplicit: boolean;
   closed: boolean;
 };
@@ -164,6 +172,18 @@ const rgbaToHexAlpha = ({ r, g, b, a }: Rgba) =>
 
 const rgbaToCss = ({ r, g, b, a }: Rgba) =>
   `rgba(${clamp255(r)}, ${clamp255(g)}, ${clamp255(b)}, ${Number(clamp(a, 0, 1).toFixed(3))})`;
+
+const parseStrokeLinecap = (v: string | null): StrokeLinecap | null => {
+  if (!v) return null;
+  const n = v.trim().toLowerCase();
+  return n === 'butt' || n === 'round' || n === 'square' || n === 'inherit' ? n : null;
+};
+
+const parseStrokeLinejoin = (v: string | null): StrokeLinejoin | null => {
+  if (!v) return null;
+  const n = v.trim().toLowerCase();
+  return n === 'miter' || n === 'round' || n === 'bevel' || n === 'inherit' ? n : null;
+};
 
 const SliderInline = ({ label, value, min, max, step = 1, unit = '', disabled, onChange }: SliderInlineProps) => {
   const safe = clamp(value, min, max);
@@ -302,10 +322,14 @@ const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: num
     fill: 'currentColor',
     stroke: 'currentColor',
     strokeWidth: 3,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
     opacity: 1,
     fillExplicit: true,
     strokeExplicit: true,
     strokeWidthExplicit: true,
+    strokeLinecapExplicit: false,
+    strokeLinejoinExplicit: false,
     opacityExplicit: false,
     closed: true,
   };
@@ -511,15 +535,19 @@ const mapPointToViewBox = (p: Vec, vb: ViewBox): Vec => {
 };
 
 const mapShapesToViewBox = (shapes: PathShape[], vb: ViewBox) =>
-  shapes.map((shape) => ({
-    ...shape,
-    points: shape.points.map((pt) => ({
-      ...pt,
-      p: mapPointToViewBox(pt.p, vb),
-      in: pt.in ? mapPointToViewBox(pt.in, vb) : null,
-      out: pt.out ? mapPointToViewBox(pt.out, vb) : null,
-    })),
-  }));
+  shapes.map((shape) => {
+    const { s } = getContainMap(vb);
+    return {
+      ...shape,
+      strokeWidth: shape.strokeWidth / s,
+      points: shape.points.map((pt) => ({
+        ...pt,
+        p: mapPointToViewBox(pt.p, vb),
+        in: pt.in ? mapPointToViewBox(pt.in, vb) : null,
+        out: pt.out ? mapPointToViewBox(pt.out, vb) : null,
+      })),
+    };
+  });
 
 const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -534,9 +562,11 @@ const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
       if (shape.svgClass.trim()) attrs.push(`class="${esc(shape.svgClass.trim())}"`);
       if (shape.fillExplicit) attrs.push(`fill="${shape.fill}"`);
       if (shape.opacityExplicit) attrs.push(`opacity="${Number(shape.opacity.toFixed(4))}"`);
-      const shouldExportStroke = shape.strokeWidth > 0;
+      const shouldExportStroke = exportShape.strokeWidth > 0;
       if (shouldExportStroke && shape.strokeExplicit) attrs.push(`stroke="${shape.stroke}"`);
-      if (shouldExportStroke && shape.strokeWidthExplicit) attrs.push(`stroke-width="${shape.strokeWidth}"`);
+      if (shouldExportStroke && shape.strokeWidthExplicit) attrs.push(`stroke-width="${Number(exportShape.strokeWidth.toFixed(4))}"`);
+      if (shouldExportStroke && shape.strokeLinecapExplicit) attrs.push(`stroke-linecap="${shape.strokeLinecap}"`);
+      if (shouldExportStroke && shape.strokeLinejoinExplicit) attrs.push(`stroke-linejoin="${shape.strokeLinejoin}"`);
       return `  <path ${attrs.join(' ')} />`;
     })
     .filter(Boolean)
@@ -553,8 +583,104 @@ const attr = (text: string, name: string) => {
   return unquoted ? unquoted[1] : null;
 };
 
+const arcToCubicSegments = (
+  x1: number,
+  y1: number,
+  rxInput: number,
+  ryInput: number,
+  angleDeg: number,
+  largeArcFlag: number,
+  sweepFlag: number,
+  x2: number,
+  y2: number,
+): Array<{ c1: Vec; c2: Vec; p: Vec }> => {
+  let rx = Math.abs(rxInput);
+  let ry = Math.abs(ryInput);
+  if (rx < 1e-9 || ry < 1e-9 || (Math.abs(x1 - x2) < 1e-9 && Math.abs(y1 - y2) < 1e-9)) {
+    return [];
+  }
+
+  const phi = (angleDeg * Math.PI) / 180;
+  const cosPhi = Math.cos(phi);
+  const sinPhi = Math.sin(phi);
+  const dx2 = (x1 - x2) / 2;
+  const dy2 = (y1 - y2) / 2;
+  const x1p = cosPhi * dx2 + sinPhi * dy2;
+  const y1p = -sinPhi * dx2 + cosPhi * dy2;
+
+  const lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+  if (lambda > 1) {
+    const s = Math.sqrt(lambda);
+    rx *= s;
+    ry *= s;
+  }
+
+  const rx2 = rx * rx;
+  const ry2 = ry * ry;
+  const x1p2 = x1p * x1p;
+  const y1p2 = y1p * y1p;
+  const sign = largeArcFlag === sweepFlag ? -1 : 1;
+  const num = rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2;
+  const den = rx2 * y1p2 + ry2 * x1p2;
+  const coef = den === 0 ? 0 : sign * Math.sqrt(Math.max(0, num / den));
+  const cxp = (coef * rx * y1p) / ry;
+  const cyp = (-coef * ry * x1p) / rx;
+
+  const cx = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2;
+  const cy = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2;
+
+  const angleBetween = (ux: number, uy: number, vx: number, vy: number) => {
+    const dot = ux * vx + uy * vy;
+    const len = Math.hypot(ux, uy) * Math.hypot(vx, vy);
+    if (len === 0) return 0;
+    const q = clamp(dot / len, -1, 1);
+    const ang = Math.acos(q);
+    return ux * vy - uy * vx < 0 ? -ang : ang;
+  };
+
+  const ux = (x1p - cxp) / rx;
+  const uy = (y1p - cyp) / ry;
+  const vx = (-x1p - cxp) / rx;
+  const vy = (-y1p - cyp) / ry;
+
+  let theta1 = angleBetween(1, 0, ux, uy);
+  let dTheta = angleBetween(ux, uy, vx, vy);
+  if (!sweepFlag && dTheta > 0) dTheta -= Math.PI * 2;
+  if (sweepFlag && dTheta < 0) dTheta += Math.PI * 2;
+
+  const segments = Math.max(1, Math.ceil(Math.abs(dTheta) / (Math.PI / 2)));
+  const step = dTheta / segments;
+  const out: Array<{ c1: Vec; c2: Vec; p: Vec }> = [];
+  const map = (x: number, y: number): Vec => ({
+    x: cx + rx * (cosPhi * x - sinPhi * y),
+    y: cy + ry * (sinPhi * x + cosPhi * y),
+  });
+
+  for (let s = 0; s < segments; s += 1) {
+    const t1 = theta1;
+    const t2 = t1 + step;
+    const dt = t2 - t1;
+    const alpha = (4 / 3) * Math.tan(dt / 4);
+    const x1u = Math.cos(t1);
+    const y1u = Math.sin(t1);
+    const x2u = Math.cos(t2);
+    const y2u = Math.sin(t2);
+    const c1u = { x: x1u - alpha * y1u, y: y1u + alpha * x1u };
+    const c2u = { x: x2u + alpha * y2u, y: y2u - alpha * x2u };
+
+    out.push({
+      c1: map(c1u.x, c1u.y),
+      c2: map(c2u.x, c2u.y),
+      p: map(x2u, y2u),
+    });
+    theta1 = t2;
+  }
+
+  return out;
+};
+
 const parsePathD = (d: string) => {
-  const tokens = (d.match(/[MLHVCZmlhvcz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []).map((t) => t.trim());
+  const tokens = (d.match(/[AaCcHhLlMmQqSsTtVvZz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []).map((t) => t.trim());
   if (!tokens.length) return null;
 
   const pts: Point[] = [];
@@ -572,7 +698,7 @@ const parsePathD = (d: string) => {
   };
 
   while (i < tokens.length) {
-    if (/^[MLHVCZmlhvcz]$/.test(tokens[i])) {
+    if (/^[AaCcHhLlMmQqSsTtVvZz]$/.test(tokens[i])) {
       const rawCmd = tokens[i];
       cmd = rawCmd.toUpperCase();
       rel = rawCmd !== cmd;
@@ -647,14 +773,57 @@ const parsePathD = (d: string) => {
       continue;
     }
 
+    if (cmd === 'A' && pts.length > 0) {
+      const rx = readNum();
+      const ry = readNum();
+      const angle = readNum();
+      const largeArcFlag = readNum();
+      const sweepFlag = readNum();
+      const x0 = readNum();
+      const y0 = readNum();
+      if (
+        rx === null ||
+        ry === null ||
+        angle === null ||
+        largeArcFlag === null ||
+        sweepFlag === null ||
+        x0 === null ||
+        y0 === null
+      ) {
+        break;
+      }
+      const x = rel ? cursor.x + x0 : x0;
+      const y = rel ? cursor.y + y0 : y0;
+      const segs = arcToCubicSegments(cursor.x, cursor.y, rx, ry, angle, largeArcFlag ? 1 : 0, sweepFlag ? 1 : 0, x, y);
+      if (!segs.length) {
+        pts.push({ id: uid(), p: { x, y }, in: null, out: null });
+      } else {
+        for (let si = 0; si < segs.length; si += 1) {
+          const seg = segs[si];
+          const prev = pts[pts.length - 1];
+          prev.out = { ...seg.c1 };
+          pts.push({ id: uid(), p: { ...seg.p }, in: { ...seg.c2 }, out: null });
+        }
+      }
+      cursor = { x, y };
+      continue;
+    }
+
+    if (cmd && !['M', 'L', 'H', 'V', 'C', 'A', 'Z'].includes(cmd)) {
+      return null;
+    }
+
     break;
   }
 
   if (pts.length < 2) return null;
   if (closed && pts.length > 2) {
     const first = pts[0].p;
-    const last = pts[pts.length - 1].p;
-    if (Math.hypot(first.x - last.x, first.y - last.y) < 0.001) {
+    const last = pts[pts.length - 1];
+    if (Math.hypot(first.x - last.p.x, first.y - last.p.y) < 0.001) {
+      // Preserve closing-curve handles before dropping duplicate end anchor.
+      if (last.in && !pts[0].in) pts[0].in = { ...last.in };
+      if (last.out && !pts[0].out) pts[0].out = { ...last.out };
       pts.pop();
     }
   }
@@ -667,6 +836,41 @@ const parsePathD = (d: string) => {
   );
   if (hasInvalid) return null;
   return { points: pts, closed };
+};
+
+const parseCirclePoints = (circleTag: string): Point[] | null => {
+  const cx = Number(attr(circleTag, 'cx') ?? '0');
+  const cy = Number(attr(circleTag, 'cy') ?? '0');
+  const r = Number(attr(circleTag, 'r'));
+  if (!Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(r) || r <= 0) return null;
+
+  const k = r * 0.5522847498307936; // Cubic-bezier approximation constant for circular arcs.
+  return [
+    {
+      id: uid(),
+      p: { x: cx + r, y: cy },
+      in: { x: cx + r, y: cy - k },
+      out: { x: cx + r, y: cy + k },
+    },
+    {
+      id: uid(),
+      p: { x: cx, y: cy + r },
+      in: { x: cx + k, y: cy + r },
+      out: { x: cx - k, y: cy + r },
+    },
+    {
+      id: uid(),
+      p: { x: cx - r, y: cy },
+      in: { x: cx - r, y: cy + k },
+      out: { x: cx - r, y: cy - k },
+    },
+    {
+      id: uid(),
+      p: { x: cx, y: cy - r },
+      in: { x: cx - k, y: cy - r },
+      out: { x: cx + k, y: cy - r },
+    },
+  ];
 };
 
 const parseViewBox = (input: string) => {
@@ -688,6 +892,8 @@ const parseSvgRootStyleDefaults = (input: string) => {
       fill: null as string | null,
       stroke: null as string | null,
       strokeWidth: null as string | null,
+      strokeLinecap: null as string | null,
+      strokeLinejoin: null as string | null,
       opacity: null as string | null,
     };
   }
@@ -695,6 +901,8 @@ const parseSvgRootStyleDefaults = (input: string) => {
     fill: attr(svgOpen, 'fill'),
     stroke: attr(svgOpen, 'stroke'),
     strokeWidth: attr(svgOpen, 'stroke-width'),
+    strokeLinecap: attr(svgOpen, 'stroke-linecap'),
+    strokeLinejoin: attr(svgOpen, 'stroke-linejoin'),
     opacity: attr(svgOpen, 'opacity'),
   };
 };
@@ -708,15 +916,19 @@ const mapPointFromViewBox = (p: Vec, vb: { minX: number; minY: number; vbW: numb
 };
 
 const mapShapesFromViewBox = (shapes: PathShape[], vb: { minX: number; minY: number; vbW: number; vbH: number }) =>
-  shapes.map((shape) => ({
-    ...shape,
-    points: shape.points.map((pt) => ({
-      ...pt,
-      p: mapPointFromViewBox(pt.p, vb),
-      in: pt.in ? mapPointFromViewBox(pt.in, vb) : null,
-      out: pt.out ? mapPointFromViewBox(pt.out, vb) : null,
-    })),
-  }));
+  shapes.map((shape) => {
+    const { s } = getContainMap(vb);
+    return {
+      ...shape,
+      strokeWidth: shape.strokeWidth * s,
+      points: shape.points.map((pt) => ({
+        ...pt,
+        p: mapPointFromViewBox(pt.p, vb),
+        in: pt.in ? mapPointFromViewBox(pt.in, vb) : null,
+        out: pt.out ? mapPointFromViewBox(pt.out, vb) : null,
+      })),
+    };
+  });
 
 const autoFitShapesToViewport = (shapes: PathShape[]) => {
   const all = shapes.flatMap((shape) => shape.points.map((pt) => pt.p));
@@ -755,50 +967,76 @@ const autoFitShapesToViewport = (shapes: PathShape[]) => {
 };
 
 const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | null => {
-  const pathMatches = [...input.matchAll(/<path\b[^>]*>/gi)].map((m) => m[0]);
-  if (!pathMatches.length) return null;
+  const geometryMatches = [...input.matchAll(/<(path|circle)\b[^>]*>/gi)].map((m) => m[0]);
+  if (!geometryMatches.length) return null;
   const rootDefaults = parseSvgRootStyleDefaults(input);
 
   const shapes: PathShape[] = [];
 
-  for (let k = 0; k < pathMatches.length; k += 1) {
-    const p = pathMatches[k];
-    const d = attr(p, 'd');
-    if (!d) continue;
-    const parsed = parsePathD(d);
-    if (!parsed) continue;
+  for (let k = 0; k < geometryMatches.length; k += 1) {
+    const tag = geometryMatches[k];
+    const isPath = /^<path\b/i.test(tag);
+    const isCircle = /^<circle\b/i.test(tag);
+    if (!isPath && !isCircle) continue;
 
-    const fillAttr = attr(p, 'fill') ?? rootDefaults.fill;
-    const strokeAttr = attr(p, 'stroke') ?? rootDefaults.stroke;
-    const swAttr = attr(p, 'stroke-width') ?? rootDefaults.strokeWidth;
+    let points: Point[] | null = null;
+    let sourceD: string | null = null;
+    let closed = false;
+    if (isPath) {
+      const d = attr(tag, 'd');
+      if (!d) continue;
+      const parsed = parsePathD(d);
+      if (!parsed) continue;
+      points = parsed.points;
+      sourceD = d;
+      closed = parsed.closed;
+    } else {
+      points = parseCirclePoints(tag);
+      if (!points) continue;
+      closed = true;
+    }
+
+    const fillAttr = attr(tag, 'fill') ?? rootDefaults.fill;
+    const strokeAttr = attr(tag, 'stroke') ?? rootDefaults.stroke;
+    const swAttr = attr(tag, 'stroke-width') ?? rootDefaults.strokeWidth;
     const sw = Number(swAttr ?? '1');
-    const opacityAttr = attr(p, 'opacity') ?? rootDefaults.opacity;
+    const slcAttr = attr(tag, 'stroke-linecap') ?? rootDefaults.strokeLinecap;
+    const sljAttr = attr(tag, 'stroke-linejoin') ?? rootDefaults.strokeLinejoin;
+    const opacityAttr = attr(tag, 'opacity') ?? rootDefaults.opacity;
     const opacity = clamp(Number(opacityAttr ?? '1'), 0, 1);
-    const svgId = attr(p, 'id') ?? '';
-    const svgClass = attr(p, 'class') ?? '';
+    const svgId = attr(tag, 'id') ?? '';
+    const svgClass = attr(tag, 'class') ?? '';
     const fill = fillAttr ?? 'currentColor';
     const stroke = strokeAttr ?? 'currentColor';
+    const strokeLinecap = parseStrokeLinecap(slcAttr) ?? 'round';
+    const strokeLinejoin = parseStrokeLinejoin(sljAttr) ?? 'round';
     const fillExplicit = fillAttr !== null;
     const strokeExplicit = strokeAttr !== null;
     const strokeWidthExplicit = swAttr !== null;
+    const strokeLinecapExplicit = slcAttr !== null;
+    const strokeLinejoinExplicit = sljAttr !== null;
 
     shapes.push({
       id: uid(),
       name: `Path ${k + 1}`,
-      points: parsed.points,
+      points,
       uiRotation: 0,
       svgId,
       svgClass,
-      sourceD: d,
+      sourceD,
       geometryDirty: false,
-      closed: parsed.closed,
+      closed,
       fill,
       stroke,
       strokeWidth: Number.isFinite(sw) ? sw : 3,
+      strokeLinecap,
+      strokeLinejoin,
       opacity: Number.isFinite(opacity) ? opacity : 1,
       fillExplicit,
       strokeExplicit,
       strokeWidthExplicit,
+      strokeLinecapExplicit,
+      strokeLinejoinExplicit,
       opacityExplicit: opacityAttr !== null,
     });
   }
@@ -1060,6 +1298,16 @@ const App = () => {
     () => highlightSelectedPathHtml(codeText, pathSelected ? selectedPath : -1, pathSelected ? selectedPoints : []),
     [codeText, selectedPath, pathSelected, selectedPoints],
   );
+  const editorDocViewBox = useMemo(() => {
+    const topLeft = mapPointFromViewBox({ x: docViewBox.minX, y: docViewBox.minY }, docViewBox);
+    const bottomRight = mapPointFromViewBox({ x: docViewBox.minX + docViewBox.vbW, y: docViewBox.minY + docViewBox.vbH }, docViewBox);
+    return {
+      minX: topLeft.x,
+      minY: topLeft.y,
+      vbW: Math.max(0, bottomRight.x - topLeft.x),
+      vbH: Math.max(0, bottomRight.y - topLeft.y),
+    };
+  }, [docViewBox]);
 
   useEffect(() => {
     if (lastShapesUpdateFromCodeRef.current) {
@@ -1661,7 +1909,7 @@ const App = () => {
   const applyCodeText = (text: string, fromUser = false) => {
     const parsed = parseSvg(text);
     if (!parsed) {
-      if (fromUser) setCodeError('Unable to parse SVG. Use <path> tags with M/L/H/V/C/Z commands.');
+      if (fromUser) setCodeError('Unable to parse SVG. Use <path> (M/L/H/V/C/Z) and/or <circle> tags.');
       return;
     }
     if (fromUser) pushUndo();
@@ -1844,43 +2092,7 @@ const App = () => {
       }}
     >
       <TopBar
-        shapes={shapes.map((shape) => ({ id: shape.id, name: shape.name, svgId: shape.svgId }))}
-        pathSelected={pathSelected}
-        selectedPath={selectedPath}
-        pathMetaMenuPathIndex={pathMetaMenu?.pathIndex ?? null}
         onOpenAbout={() => setAboutOpen(true)}
-        onPathDoubleClick={(pathIndex, rect) => openPathMetaMenu(pathIndex, rect)}
-        onPathClick={(pathIndex) => {
-          const all = allPointIndicesForPath(pathIndex);
-          setPathSelected(true);
-          setSelectedPath(pathIndex);
-          setSelectedPaths([pathIndex]);
-          setSelectedPoint(all[0]);
-          setSelectedPoints(all);
-        }}
-        shapeTriggerRef={shapeTriggerRef}
-        onOpenShapeMenu={(rect) => {
-          const menuW = 208;
-          const menuH = 58;
-          const pad = 8;
-          const x = clamp(rect.left, pad, Math.max(pad, window.innerWidth - menuW - pad));
-          const y = clamp(rect.bottom + 6, pad, Math.max(pad, window.innerHeight - menuH - pad));
-          setShapeMenu({ x, y });
-          setStyleMenu(null);
-          setPathMetaMenu(null);
-          setCurrentColorMenu(null);
-        }}
-        confirmDeletePath={confirmDeletePath}
-        canDeletePath={canDeletePath}
-        onRequestDelete={() => {
-          if (!canDeletePath) return;
-          setConfirmDeletePath(true);
-        }}
-        onConfirmDelete={() => {
-          deletePath();
-          setConfirmDeletePath(false);
-        }}
-        onCancelDelete={() => setConfirmDeletePath(false)}
       />
 
       <div
@@ -2062,17 +2274,17 @@ const App = () => {
             {showViewBox ? (
               <>
                 <rect
-                  x={docViewBox.minX}
-                  y={docViewBox.minY}
-                  width={docViewBox.vbW}
-                  height={docViewBox.vbH}
+                  x={editorDocViewBox.minX}
+                  y={editorDocViewBox.minY}
+                  width={editorDocViewBox.vbW}
+                  height={editorDocViewBox.vbH}
                   className="viewbox-overlay"
                   vectorEffect="non-scaling-stroke"
                   pointerEvents="none"
                 />
                 <text
-                  x={docViewBox.minX + 8 / zoom}
-                  y={docViewBox.minY + 16 / zoom}
+                  x={editorDocViewBox.minX + 8 / zoom}
+                  y={editorDocViewBox.minY + 16 / zoom}
                   className="viewbox-label"
                   style={{ fontSize: `${11 / zoom}px` }}
                   pointerEvents="none"
@@ -2089,6 +2301,8 @@ const App = () => {
                 fill={shape.fillExplicit ? shape.fill : 'currentColor'}
                 stroke={shape.strokeExplicit ? shape.stroke : 'none'}
                 strokeWidth={shape.strokeWidthExplicit ? shape.strokeWidth : undefined}
+                strokeLinecap={shape.strokeLinecapExplicit ? shape.strokeLinecap : undefined}
+                strokeLinejoin={shape.strokeLinejoinExplicit ? shape.strokeLinejoin : undefined}
                 opacity={shape.opacityExplicit ? shape.opacity : 1}
                 onPointerDown={(e) => {
                   if (!spaceDown && (tool === 'select' || tool === 'scale')) {
@@ -2588,6 +2802,45 @@ const App = () => {
             setCodePaneWidth(clamp(paneDrag.startWidth - dx, 260, 860));
           }}
           onPaneDragEnd={() => setPaneDrag(null)}
+        />
+
+        <PathPane
+          shapes={shapes.map((shape) => ({ id: shape.id, name: shape.name, svgId: shape.svgId }))}
+          pathSelected={pathSelected}
+          selectedPath={selectedPath}
+          pathMetaMenuPathIndex={pathMetaMenu?.pathIndex ?? null}
+          onPathDoubleClick={(pathIndex, rect) => openPathMetaMenu(pathIndex, rect)}
+          onPathClick={(pathIndex) => {
+            const all = allPointIndicesForPath(pathIndex);
+            setPathSelected(true);
+            setSelectedPath(pathIndex);
+            setSelectedPaths([pathIndex]);
+            setSelectedPoint(all[0]);
+            setSelectedPoints(all);
+          }}
+          shapeTriggerRef={shapeTriggerRef}
+          onOpenShapeMenu={(rect) => {
+            const menuW = 208;
+            const menuH = 58;
+            const pad = 8;
+            const x = clamp(rect.left, pad, Math.max(pad, window.innerWidth - menuW - pad));
+            const y = clamp(rect.bottom + 6, pad, Math.max(pad, window.innerHeight - menuH - pad));
+            setShapeMenu({ x, y });
+            setStyleMenu(null);
+            setPathMetaMenu(null);
+            setCurrentColorMenu(null);
+          }}
+          confirmDeletePath={confirmDeletePath}
+          canDeletePath={canDeletePath}
+          onRequestDelete={() => {
+            if (!canDeletePath) return;
+            setConfirmDeletePath(true);
+          }}
+          onConfirmDelete={() => {
+            deletePath();
+            setConfirmDeletePath(false);
+          }}
+          onCancelDelete={() => setConfirmDeletePath(false)}
         />
       </div>
       {pathMetaMenu ? (

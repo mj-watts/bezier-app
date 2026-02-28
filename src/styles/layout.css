@@ -48,7 +48,7 @@ textarea {
   padding: 10px 14px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 16px;
 }
 
@@ -243,7 +243,12 @@ textarea {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: 74px minmax(260px, 1fr) 8px minmax(260px, var(--code-pane-width, 420px));
+  grid-template-columns:
+    74px
+    minmax(260px, 1fr)
+    8px
+    minmax(260px, var(--code-pane-width, 420px))
+    minmax(160px, calc(var(--code-pane-width, 420px) / 2));
 }
 
 .tool-dock {
@@ -274,6 +279,50 @@ textarea {
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 10px;
+}
+
+.paths-pane {
+  min-height: 0;
+  padding: 12px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  background: var(--panel);
+  border-left: 1px solid var(--edge);
+}
+
+.paths-pane-header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.paths-pane-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.paths-pane-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paths-list {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.paths-list-tab {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
 }
 
 .pane-splitter {

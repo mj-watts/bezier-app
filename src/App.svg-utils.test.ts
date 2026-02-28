@@ -32,6 +32,34 @@ describe('SVG utils', () => {
     expect(parsed?.shapes[0]?.closed).toBe(true);
   });
 
+  it('parseSvg imports circle tags as closed paths', () => {
+    const circleSvg = `<svg viewBox="0 0 24 24"><circle cx="11" cy="13" r="9" stroke="currentColor" stroke-width="2"/></svg>`;
+    const parsed = parseSvg(circleSvg);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.shapes).toHaveLength(1);
+    const first = parsed?.shapes[0];
+    expect(first?.closed).toBe(true);
+    expect(first?.points).toHaveLength(4);
+    expect(first?.points.every((pt) => pt.in !== null && pt.out !== null)).toBe(true);
+    expect(first?.strokeWidth).toBeCloseTo(46.6667, 3);
+    expect(first?.sourceD).toBeNull();
+  });
+
+  it('parseSvg supports arc commands used by lucide icons', () => {
+    const bombSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="13" r="9"/><path d="M14.35 4.65 16.3 2.7a2.41 2.41 0 0 1 3.4 0l1.6 1.6a2.4 2.4 0 0 1 0 3.4l-1.95 1.95"/><path d="m22 2-1.5 1.5"/></svg>`;
+    const parsed = parseSvg(bombSvg);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.shapes).toHaveLength(3);
+    const fuse = parsed?.shapes[1];
+    expect(fuse?.points.length).toBeGreaterThanOrEqual(5);
+    expect(fuse?.points.some((pt) => pt.in !== null || pt.out !== null)).toBe(true);
+  });
+
+  it('parseSvg rejects unsupported path commands instead of mis-parsing', () => {
+    const quadraticSvg = `<svg viewBox="0 0 24 24"><path d="M2 2 Q 12 0 22 22"/></svg>`;
+    expect(parseSvg(quadraticSvg)).toBeNull();
+  });
+
   it('parseSvg inherits root fill/stroke defaults', () => {
     const inheritedSvg = `<svg viewBox="0 0 10 10" fill="none" stroke="#216979" stroke-width="0.5"><path d="M 1 1 H 9 V 9 H 1 Z" /></svg>`;
     const parsed = parseSvg(inheritedSvg);
@@ -41,8 +69,35 @@ describe('SVG utils', () => {
     expect(first?.fillExplicit).toBe(true);
     expect(first?.stroke).toBe('#216979');
     expect(first?.strokeExplicit).toBe(true);
-    expect(first?.strokeWidth).toBe(0.5);
+    expect(first?.strokeWidth).toBeCloseTo(28, 6);
     expect(first?.strokeWidthExplicit).toBe(true);
+  });
+
+  it('parseSvg and serializeSvg preserve round line caps and joins', () => {
+    const roundedSvg = `<svg viewBox="0 0 24 24"><path d="M10 10V14" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const parsed = parseSvg(roundedSvg);
+    expect(parsed).not.toBeNull();
+    const first = parsed?.shapes[0];
+    expect(first?.strokeLinecap).toBe('round');
+    expect(first?.strokeLinejoin).toBe('round');
+    expect(first?.strokeLinecapExplicit).toBe(true);
+    expect(first?.strokeLinejoinExplicit).toBe(true);
+
+    if (!parsed) return;
+    const out = serializeSvg(parsed.shapes, parsed.viewBox);
+    const pathTag = out.match(/<path\b[^>]*>/i)?.[0] ?? '';
+    expect(pathTag).toContain('stroke-linecap="round"');
+    expect(pathTag).toContain('stroke-linejoin="round"');
+    expect(pathTag).toContain('stroke-width="2"');
+  });
+
+  it('parseSvg preserves closing curve handles when Z closes on the first anchor', () => {
+    const roundedRectSvg = `<svg viewBox="0 0 24 24"><path d="M16 6H4C2.89543 6 2 6.89543 2 8V16C2 17.1046 2.89543 18 4 18H16C17.1046 18 18 17.1046 18 16V8C18 6.89543 17.1046 6 16 6Z" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const parsed = parseSvg(roundedRectSvg);
+    expect(parsed).not.toBeNull();
+    const first = parsed?.shapes[0]?.points[0];
+    expect(first).toBeTruthy();
+    expect(first?.in).not.toBeNull();
   });
 
   it('serializeSvg omits stroke attrs when stroke width is zero', () => {
