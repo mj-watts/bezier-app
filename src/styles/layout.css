@@ -731,6 +731,22 @@ input[type='checkbox'] {
   cursor: ew-resize;
 }
 
+.scale-edge-hit {
+  stroke: transparent;
+  fill: none;
+  pointer-events: stroke;
+}
+
+.scale-edge-hit.n,
+.scale-edge-hit.s {
+  cursor: ns-resize;
+}
+
+.scale-edge-hit.e,
+.scale-edge-hit.w {
+  cursor: ew-resize;
+}
+
 .scale-pivot {
   fill: var(--accent-yellow);
   stroke: #fff3dc;

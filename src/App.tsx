@@ -1417,6 +1417,7 @@ const App = () => {
         setSelectedPath(0);
         setSelectedPoint(all[0] ?? 0);
         setSelectedPoints(all.length ? all : [0]);
+        enterTransformMode();
       }
       if (key === 'delete' || key === 'backspace') {
         e.preventDefault();
@@ -1599,6 +1600,7 @@ const App = () => {
       return next;
     });
     setShapeMenu(null);
+    enterTransformMode();
   };
 
   const deletePath = () => {
@@ -1922,6 +1924,7 @@ const App = () => {
     setPathSelected(true);
     setSelectedPoint(0);
     setSelectedPoints([0]);
+    enterTransformMode();
   };
 
   const updateActiveStyle = (patch: Partial<Pick<PathShape, 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'closed'>>) => {
@@ -1964,6 +1967,11 @@ const App = () => {
     return all.length ? all : [0];
   };
 
+  const enterTransformMode = () => {
+    setTool('scale');
+    setPenHover(null);
+  };
+
   const syncSelectionFromCodeCursor = (el: HTMLTextAreaElement) => {
     const caret = el.selectionStart ?? 0;
     const idx = pathIndexAtCaret(codeText, caret);
@@ -1976,6 +1984,7 @@ const App = () => {
     setSelectedPaths([idx]);
     setSelectedPoint(all[0]);
     setSelectedPoints(all);
+    enterTransformMode();
   };
 
   const copySvgCode = async () => {
@@ -2267,6 +2276,7 @@ const App = () => {
                   setSelectedPath(hits[0]);
                   setSelectedPoint(all[0]);
                   setSelectedPoints(all);
+                  enterTransformMode();
                 }
                 setMarquee(null);
               }}
@@ -2307,6 +2317,7 @@ const App = () => {
                 onPointerDown={(e) => {
                   if (!spaceDown && (tool === 'select' || tool === 'scale')) {
                     setPathSelected(true);
+                    enterTransformMode();
                     if (e.shiftKey) {
                       setSelectedPaths((curr) => {
                         const exists = curr.includes(i);
@@ -2460,6 +2471,9 @@ const App = () => {
                   const br = rot({ x: b.maxX, y: b.maxY });
                   const bl = rot({ x: b.minX, y: b.maxY });
                   const topMid = rot({ x: b.cx, y: b.minY });
+                  const rightMid = rot({ x: b.maxX, y: b.cy });
+                  const bottomMid = rot({ x: b.cx, y: b.maxY });
+                  const leftMid = rot({ x: b.minX, y: b.cy });
                   const rotArmEnd = rot({ x: b.cx, y: b.minY - 18 / zoom });
                   const rotHandle = rot({ x: b.cx, y: b.minY - 22 / zoom });
                   const axisX1 = rot({ x: b.cx - 8 / zoom, y: b.cy });
@@ -2493,6 +2507,122 @@ const App = () => {
                   d={`M ${tl.x} ${tl.y} L ${tr.x} ${tr.y} L ${br.x} ${br.y} L ${bl.x} ${bl.y} Z`}
                   className="scale-box"
                   vectorEffect="non-scaling-stroke"
+                />
+                <line
+                  x1={tl.x}
+                  y1={tl.y}
+                  x2={tr.x}
+                  y2={tr.y}
+                  className="scale-edge-hit n"
+                  strokeWidth={12 / zoom}
+                  onPointerDown={(e) => {
+                    if (spaceDown) return;
+                    e.stopPropagation();
+                    pushUndo();
+                    const svg = e.currentTarget.ownerSVGElement;
+                    if (!svg) return;
+                    const startPos = toLocal(e.clientX, e.clientY, svg);
+                    setDrag({
+                      kind: 'scale',
+                      pathIndex: selectedPath,
+                      affectAll: transformAllPaths || selectedPaths.length > 1,
+                      targetPathIndices: transformTargetIndices,
+                      axis: 'y',
+                      originOpp: bottomMid,
+                      originCenter: { x: b.cx, y: b.cy },
+                      startVecOpp: { x: startPos.x - bottomMid.x, y: startPos.y - bottomMid.y },
+                      startVecCenter: { x: startPos.x - b.cx, y: startPos.y - b.cy },
+                      baseShapes: cloneShapes(shapes),
+                    });
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                  }}
+                />
+                <line
+                  x1={tr.x}
+                  y1={tr.y}
+                  x2={br.x}
+                  y2={br.y}
+                  className="scale-edge-hit e"
+                  strokeWidth={12 / zoom}
+                  onPointerDown={(e) => {
+                    if (spaceDown) return;
+                    e.stopPropagation();
+                    pushUndo();
+                    const svg = e.currentTarget.ownerSVGElement;
+                    if (!svg) return;
+                    const startPos = toLocal(e.clientX, e.clientY, svg);
+                    setDrag({
+                      kind: 'scale',
+                      pathIndex: selectedPath,
+                      affectAll: transformAllPaths || selectedPaths.length > 1,
+                      targetPathIndices: transformTargetIndices,
+                      axis: 'x',
+                      originOpp: leftMid,
+                      originCenter: { x: b.cx, y: b.cy },
+                      startVecOpp: { x: startPos.x - leftMid.x, y: startPos.y - leftMid.y },
+                      startVecCenter: { x: startPos.x - b.cx, y: startPos.y - b.cy },
+                      baseShapes: cloneShapes(shapes),
+                    });
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                  }}
+                />
+                <line
+                  x1={bl.x}
+                  y1={bl.y}
+                  x2={br.x}
+                  y2={br.y}
+                  className="scale-edge-hit s"
+                  strokeWidth={12 / zoom}
+                  onPointerDown={(e) => {
+                    if (spaceDown) return;
+                    e.stopPropagation();
+                    pushUndo();
+                    const svg = e.currentTarget.ownerSVGElement;
+                    if (!svg) return;
+                    const startPos = toLocal(e.clientX, e.clientY, svg);
+                    setDrag({
+                      kind: 'scale',
+                      pathIndex: selectedPath,
+                      affectAll: transformAllPaths || selectedPaths.length > 1,
+                      targetPathIndices: transformTargetIndices,
+                      axis: 'y',
+                      originOpp: topMid,
+                      originCenter: { x: b.cx, y: b.cy },
+                      startVecOpp: { x: startPos.x - topMid.x, y: startPos.y - topMid.y },
+                      startVecCenter: { x: startPos.x - b.cx, y: startPos.y - b.cy },
+                      baseShapes: cloneShapes(shapes),
+                    });
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                  }}
+                />
+                <line
+                  x1={tl.x}
+                  y1={tl.y}
+                  x2={bl.x}
+                  y2={bl.y}
+                  className="scale-edge-hit w"
+                  strokeWidth={12 / zoom}
+                  onPointerDown={(e) => {
+                    if (spaceDown) return;
+                    e.stopPropagation();
+                    pushUndo();
+                    const svg = e.currentTarget.ownerSVGElement;
+                    if (!svg) return;
+                    const startPos = toLocal(e.clientX, e.clientY, svg);
+                    setDrag({
+                      kind: 'scale',
+                      pathIndex: selectedPath,
+                      affectAll: transformAllPaths || selectedPaths.length > 1,
+                      targetPathIndices: transformTargetIndices,
+                      axis: 'x',
+                      originOpp: rightMid,
+                      originCenter: { x: b.cx, y: b.cy },
+                      startVecOpp: { x: startPos.x - rightMid.x, y: startPos.y - rightMid.y },
+                      startVecCenter: { x: startPos.x - b.cx, y: startPos.y - b.cy },
+                      baseShapes: cloneShapes(shapes),
+                    });
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                  }}
                 />
                 {(
                   [
@@ -2817,6 +2947,7 @@ const App = () => {
             setSelectedPaths([pathIndex]);
             setSelectedPoint(all[0]);
             setSelectedPoints(all);
+            enterTransformMode();
           }}
           shapeTriggerRef={shapeTriggerRef}
           onOpenShapeMenu={(rect) => {
