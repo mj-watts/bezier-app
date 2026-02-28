@@ -117,3 +117,6 @@
   grid-template-columns: auto minmax(90px, 1fr) 52px auto;
 }
 
+.style-menu-current-color-btn {
+  width: 100%;
+}

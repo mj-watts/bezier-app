@@ -299,8 +299,8 @@ const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: num
     svgClass: '',
     sourceD: null,
     geometryDirty: true,
-    fill: '#58a6ff55',
-    stroke: '#79c0ff',
+    fill: 'currentColor',
+    stroke: 'currentColor',
     strokeWidth: 3,
     opacity: 1,
     fillExplicit: true,
@@ -776,8 +776,8 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
     const opacity = clamp(Number(opacityAttr ?? '1'), 0, 1);
     const svgId = attr(p, 'id') ?? '';
     const svgClass = attr(p, 'class') ?? '';
-    const fill = fillAttr ?? '#000000';
-    const stroke = strokeAttr ?? '#000000';
+    const fill = fillAttr ?? 'currentColor';
+    const stroke = strokeAttr ?? 'currentColor';
     const fillExplicit = fillAttr !== null;
     const strokeExplicit = strokeAttr !== null;
     const strokeWidthExplicit = swAttr !== null;
@@ -1691,7 +1691,7 @@ const App = () => {
     );
   };
 
-  const activeFill = useMemo(() => parseColorToRgba(activePath.fill, { r: 88, g: 166, b: 255, a: 0.33 }), [activePath.fill]);
+  const activeFill = useMemo(() => parseColorToRgba(activePath.fill, { r: 88, g: 166, b: 255, a: 1 }), [activePath.fill]);
   const activeStroke = useMemo(
     () => parseColorToRgba(activePath.stroke, { r: 121, g: 192, b: 255, a: 1 }),
     [activePath.stroke],
@@ -1996,39 +1996,12 @@ const App = () => {
                   return;
                 }
 
-                // Point-marquee selection should work whether or not a path was preselected.
-                const pointHitsByPath = shapes
-                  .map((shape, pathIndex) => ({
-                    pathIndex,
-                    points: shape.points
-                      .map((pt, i) => ({ i, pt }))
-                      .filter(({ pt }) => pt.p.x >= minX && pt.p.x <= maxX && pt.p.y >= minY && pt.p.y <= maxY)
-                      .map(({ i }) => i),
-                  }))
-                  .filter((hit) => hit.points.length > 0);
-
-                if (pointHitsByPath.length) {
-                  const preferred = pointHitsByPath.find((h) => h.pathIndex === selectedPath);
-                  const best =
-                    preferred ??
-                    pointHitsByPath.reduce((acc, curr) =>
-                      curr.points.length > acc.points.length ? curr : curr.points.length === acc.points.length && curr.pathIndex < acc.pathIndex ? curr : acc,
-                    );
-                  setPathSelected(true);
-                  setSelectedPaths([best.pathIndex]);
-                  setSelectedPath(best.pathIndex);
-                  setSelectedPoints(best.points);
-                  setSelectedPoint(best.points[0]);
-                  setMarquee(null);
-                  return;
-                }
-
                 const hits = shapes
                   .map((shape, i) => ({ i, b: getPathBounds(shape.points) }))
                   .filter(({ b }) => b !== null)
                   .filter(({ b }) => {
                     if (!b) return false;
-                    return !(b.maxX < minX || b.minX > maxX || b.maxY < minY || b.minY > maxY);
+                    return b.minX >= minX && b.maxX <= maxX && b.minY >= minY && b.maxY <= maxY;
                   })
                   .map(({ i }) => i);
 
@@ -2070,10 +2043,10 @@ const App = () => {
               <path
                 key={shape.id}
                 d={pathDs[i]}
-                fill={shape.fillExplicit ? shape.fill : '#000000'}
+                fill={shape.fillExplicit ? shape.fill : 'currentColor'}
                 stroke={shape.strokeExplicit ? shape.stroke : 'none'}
                 strokeWidth={shape.strokeWidthExplicit ? shape.strokeWidth : undefined}
-                opacity={(shape.opacityExplicit ? shape.opacity : 1) * (!pathSelected ? 1 : selectedPaths.includes(i) ? 1 : 0.5)}
+                opacity={shape.opacityExplicit ? shape.opacity : 1}
                 onPointerDown={(e) => {
                   if (!spaceDown && (tool === 'select' || tool === 'scale')) {
                     setPathSelected(true);
@@ -2659,6 +2632,13 @@ const App = () => {
                   }
                 />
               </label>
+              <button
+                className="control-btn text-sm style-menu-current-color-btn"
+                type="button"
+                onClick={() => updateActiveStyle({ fill: 'currentColor' })}
+              >
+                set as currentColor
+              </button>
             </>
           ) : null}
           {styleMenu.kind === 'stroke' ? (
@@ -2685,6 +2665,13 @@ const App = () => {
                   onChange={(v) => updateActiveStyle({ strokeWidth: Math.round(v) })}
                 />
               </label>
+              <button
+                className="control-btn text-sm style-menu-current-color-btn"
+                type="button"
+                onClick={() => updateActiveStyle({ stroke: 'currentColor' })}
+              >
+                set as currentColor
+              </button>
             </>
           ) : null}
           {styleMenu.kind === 'opacity' ? (

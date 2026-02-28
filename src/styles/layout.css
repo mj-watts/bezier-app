@@ -547,6 +547,7 @@ input[type='checkbox'] {
   border: 1px solid var(--edge);
   border-radius: 4px;
   background: #12161d;
+  color: #ffffff;
 }
 
 .editor.pen {
@@ -785,4 +786,3 @@ textarea {
   color: #ff9f9f;
   font-size: 0.85rem;
 }
-
