@@ -48,8 +48,25 @@ textarea {
   padding: 10px 14px;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   gap: 16px;
+}
+
+.topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-inline-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar-inline-confirm .icon-btn {
+  width: 34px;
+  height: 34px;
 }
 
 .brand-trigger {
@@ -217,6 +234,15 @@ textarea {
 }
 
 .control-btn.confirm-text:hover {
+  background: linear-gradient(180deg, #432626 0%, #361d1d 100%);
+}
+
+.icon-btn.confirm-text {
+  background: linear-gradient(180deg, #4f2f2f 0%, #432828 100%);
+  color: #f1d8d8;
+}
+
+.icon-btn.confirm-text:hover {
   background: linear-gradient(180deg, #432626 0%, #361d1d 100%);
 }
 
@@ -619,6 +645,13 @@ input[type='checkbox'] {
   color: #ffffff;
 }
 
+.editor:focus,
+.editor:focus-visible {
+  outline: none;
+  border-color: var(--accent-yellow-soft);
+  box-shadow: 0 0 0 1px rgba(255, 154, 0, 0.7), 0 0 0 3px rgba(255, 154, 0, 0.25);
+}
+
 .editor.pen {
   cursor: crosshair;
 }
@@ -696,7 +729,7 @@ input[type='checkbox'] {
 
 .scale-move-hit {
   fill: transparent;
-  cursor: move;
+  cursor: inherit;
 }
 
 .scale-handle {
@@ -747,11 +780,28 @@ input[type='checkbox'] {
   cursor: ew-resize;
 }
 
+.scale-size-tag-box {
+  fill: #ff9a00;
+  stroke: #ffb347;
+  stroke-width: 1;
+}
+
+.scale-size-tag-text {
+  fill: #2f3640;
+  font-family: "Avenir Next", Avenir, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+}
+
 .scale-pivot {
   fill: var(--accent-yellow);
   stroke: #fff3dc;
   stroke-width: 1;
   pointer-events: none;
+}
+
+.scale-pivot-hit {
+  fill: transparent;
+  cursor: move;
 }
 
 .scale-pivot-line {
@@ -797,6 +847,12 @@ input[type='checkbox'] {
   align-items: center;
   justify-content: space-between;
   min-height: 42px;
+}
+
+.code-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .code-header h2 {
@@ -849,25 +905,56 @@ textarea {
 }
 
 .code-overlay .selected-code {
-  background: rgba(255, 154, 0, 0.35);
-  border-radius: 3px;
-  color: transparent;
+  background: rgba(255, 154, 0, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 154, 0, 0.45);
+  border-radius: 2px;
+  color: #c9ddf4;
 }
 
 .code-overlay .selected-point-code {
-  background: rgba(255, 72, 72, 0.45);
+  background: rgba(255, 72, 72, 0.22);
+  box-shadow: inset 0 -1px 0 rgba(255, 72, 72, 0.75);
   border-radius: 2px;
-  color: transparent;
+  color: #ffd7c9;
 }
 
 .code-wrap textarea {
   position: relative;
   z-index: 1;
   background: transparent;
+  color: transparent;
+  caret-color: #c9ddf4;
+}
+
+.code-wrap textarea:focus,
+.code-wrap textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent-yellow-soft);
+  box-shadow: 0 0 0 1px rgba(255, 154, 0, 0.7), 0 0 0 3px rgba(255, 154, 0, 0.25);
 }
 
 .error {
   margin: 0;
   color: #ff9f9f;
   font-size: 0.85rem;
+}
+
+.code-overlay .tok-punc {
+  color: #a9b8ca;
+}
+
+.code-overlay .tok-tag {
+  color: #6db6ff;
+}
+
+.code-overlay .tok-attr {
+  color: #ffd783;
+}
+
+.code-overlay .tok-string {
+  color: #9fe09f;
+}
+
+.code-overlay .tok-number {
+  color: #f7a8ff;
 }

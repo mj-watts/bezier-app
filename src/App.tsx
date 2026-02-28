@@ -575,6 +575,45 @@ const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.minX} ${vb.minY} ${vb.vbW} ${vb.vbH}">\n${lines}\n</svg>`;
 };
 
+const formatSvgCode = (input: string): string => {
+  const compact = input
+    .replace(/>\s+</g, '><')
+    .replace(/\r\n/g, '\n')
+    .trim();
+  if (!compact) return '';
+
+  const tokens = compact.match(/<[^>]+>|[^<]+/g) ?? [];
+  const lines: string[] = [];
+  let indent = 0;
+  const pad = (n: number) => '  '.repeat(Math.max(0, n));
+
+  for (const raw of tokens) {
+    const token = raw.trim();
+    if (!token) continue;
+
+    if (/^<\//.test(token)) {
+      indent = Math.max(0, indent - 1);
+      lines.push(`${pad(indent)}${token}`);
+      continue;
+    }
+
+    if (/^<[^!?][^>]*\/>$/.test(token)) {
+      lines.push(`${pad(indent)}${token}`);
+      continue;
+    }
+
+    if (/^<[^!?][^>]*>$/.test(token)) {
+      lines.push(`${pad(indent)}${token}`);
+      indent += 1;
+      continue;
+    }
+
+    lines.push(`${pad(indent)}${token}`);
+  }
+
+  return lines.join('\n');
+};
+
 const attr = (text: string, name: string) => {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const quoted = text.match(new RegExp(`${escaped}\\s*=\\s*(['"])(.*?)\\1`, 'i'));
@@ -680,6 +719,9 @@ const arcToCubicSegments = (
 };
 
 const parsePathD = (d: string) => {
+  const commandsOnly = d.replace(/-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi, ' ');
+  const hasUnsupportedCommand = (commandsOnly.match(/[A-Za-z]/g) ?? []).some((ch) => !'AaCcHhLlMmQqSsTtVvZz'.includes(ch));
+  if (hasUnsupportedCommand) return null;
   const tokens = (d.match(/[AaCcHhLlMmQqSsTtVvZz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []).map((t) => t.trim());
   if (!tokens.length) return null;
 
@@ -688,7 +730,11 @@ const parsePathD = (d: string) => {
   let cmd = '';
   let rel = false;
   let cursor = { x: 0, y: 0 };
+  let subpathStart: Vec | null = null;
   let closed = false;
+  let prevCmd = '';
+  let lastCubicControl: Vec | null = null;
+  let lastQuadraticControl: Vec | null = null;
 
   const readNum = (): number | null => {
     if (i >= tokens.length) return null;
@@ -705,6 +751,10 @@ const parsePathD = (d: string) => {
       i += 1;
       if (cmd === 'Z') {
         closed = true;
+        if (subpathStart) cursor = { ...subpathStart };
+        prevCmd = 'Z';
+        lastCubicControl = null;
+        lastQuadraticControl = null;
       }
       continue;
     }
@@ -717,7 +767,11 @@ const parsePathD = (d: string) => {
       const y = rel ? cursor.y + y0 : y0;
       pts.push({ id: uid(), p: { x, y }, in: null, out: null });
       cursor = { x, y };
+      subpathStart = { x, y };
       cmd = 'L';
+      prevCmd = 'M';
+      lastCubicControl = null;
+      lastQuadraticControl = null;
       continue;
     }
 
@@ -729,6 +783,9 @@ const parsePathD = (d: string) => {
       const y = rel ? cursor.y + y0 : y0;
       pts.push({ id: uid(), p: { x, y }, in: null, out: null });
       cursor = { x, y };
+      prevCmd = 'L';
+      lastCubicControl = null;
+      lastQuadraticControl = null;
       continue;
     }
 
@@ -739,6 +796,9 @@ const parsePathD = (d: string) => {
       const y = cursor.y;
       pts.push({ id: uid(), p: { x, y }, in: null, out: null });
       cursor = { x, y };
+      prevCmd = 'H';
+      lastCubicControl = null;
+      lastQuadraticControl = null;
       continue;
     }
 
@@ -749,6 +809,9 @@ const parsePathD = (d: string) => {
       const y = rel ? cursor.y + y0 : y0;
       pts.push({ id: uid(), p: { x, y }, in: null, out: null });
       cursor = { x, y };
+      prevCmd = 'V';
+      lastCubicControl = null;
+      lastQuadraticControl = null;
       continue;
     }
 
@@ -770,6 +833,75 @@ const parsePathD = (d: string) => {
       prev.out = { x: x1, y: y1 };
       pts.push({ id: uid(), p: { x, y }, in: { x: x2, y: y2 }, out: null });
       cursor = { x, y };
+      prevCmd = 'C';
+      lastCubicControl = { x: x2, y: y2 };
+      lastQuadraticControl = null;
+      continue;
+    }
+
+    if (cmd === 'S' && pts.length > 0) {
+      const x20 = readNum();
+      const y20 = readNum();
+      const x0 = readNum();
+      const y0 = readNum();
+      if (x20 === null || y20 === null || x0 === null || y0 === null) break;
+      const x2 = rel ? cursor.x + x20 : x20;
+      const y2 = rel ? cursor.y + y20 : y20;
+      const x = rel ? cursor.x + x0 : x0;
+      const y = rel ? cursor.y + y0 : y0;
+      const x1 = prevCmd === 'C' || prevCmd === 'S' ? 2 * cursor.x - (lastCubicControl?.x ?? cursor.x) : cursor.x;
+      const y1 = prevCmd === 'C' || prevCmd === 'S' ? 2 * cursor.y - (lastCubicControl?.y ?? cursor.y) : cursor.y;
+      const prev = pts[pts.length - 1];
+      prev.out = { x: x1, y: y1 };
+      pts.push({ id: uid(), p: { x, y }, in: { x: x2, y: y2 }, out: null });
+      cursor = { x, y };
+      prevCmd = 'S';
+      lastCubicControl = { x: x2, y: y2 };
+      lastQuadraticControl = null;
+      continue;
+    }
+
+    if (cmd === 'Q' && pts.length > 0) {
+      const x10 = readNum();
+      const y10 = readNum();
+      const x0 = readNum();
+      const y0 = readNum();
+      if (x10 === null || y10 === null || x0 === null || y0 === null) break;
+      const qx = rel ? cursor.x + x10 : x10;
+      const qy = rel ? cursor.y + y10 : y10;
+      const x = rel ? cursor.x + x0 : x0;
+      const y = rel ? cursor.y + y0 : y0;
+      const c1 = { x: cursor.x + (2 / 3) * (qx - cursor.x), y: cursor.y + (2 / 3) * (qy - cursor.y) };
+      const c2 = { x: x + (2 / 3) * (qx - x), y: y + (2 / 3) * (qy - y) };
+      const prev = pts[pts.length - 1];
+      prev.out = c1;
+      pts.push({ id: uid(), p: { x, y }, in: c2, out: null });
+      cursor = { x, y };
+      prevCmd = 'Q';
+      lastCubicControl = null;
+      lastQuadraticControl = { x: qx, y: qy };
+      continue;
+    }
+
+    if (cmd === 'T' && pts.length > 0) {
+      const x0 = readNum();
+      const y0 = readNum();
+      if (x0 === null || y0 === null) break;
+      const x = rel ? cursor.x + x0 : x0;
+      const y = rel ? cursor.y + y0 : y0;
+      const q: Vec =
+        prevCmd === 'Q' || prevCmd === 'T'
+          ? { x: 2 * cursor.x - (lastQuadraticControl?.x ?? cursor.x), y: 2 * cursor.y - (lastQuadraticControl?.y ?? cursor.y) }
+          : { ...cursor };
+      const c1 = { x: cursor.x + (2 / 3) * (q.x - cursor.x), y: cursor.y + (2 / 3) * (q.y - cursor.y) };
+      const c2 = { x: x + (2 / 3) * (q.x - x), y: y + (2 / 3) * (q.y - y) };
+      const prev = pts[pts.length - 1];
+      prev.out = c1;
+      pts.push({ id: uid(), p: { x, y }, in: c2, out: null });
+      cursor = { x, y };
+      prevCmd = 'T';
+      lastCubicControl = null;
+      lastQuadraticControl = q;
       continue;
     }
 
@@ -806,10 +938,13 @@ const parsePathD = (d: string) => {
         }
       }
       cursor = { x, y };
+      prevCmd = 'A';
+      lastCubicControl = null;
+      lastQuadraticControl = null;
       continue;
     }
 
-    if (cmd && !['M', 'L', 'H', 'V', 'C', 'A', 'Z'].includes(cmd)) {
+    if (cmd && !['M', 'L', 'H', 'V', 'C', 'S', 'Q', 'T', 'A', 'Z'].includes(cmd)) {
       return null;
     }
 
@@ -871,6 +1006,99 @@ const parseCirclePoints = (circleTag: string): Point[] | null => {
       out: { x: cx + k, y: cy - r },
     },
   ];
+};
+
+const parseEllipsePoints = (ellipseTag: string): Point[] | null => {
+  const cx = Number(attr(ellipseTag, 'cx') ?? '0');
+  const cy = Number(attr(ellipseTag, 'cy') ?? '0');
+  const rx = Number(attr(ellipseTag, 'rx'));
+  const ry = Number(attr(ellipseTag, 'ry'));
+  if (!Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(rx) || !Number.isFinite(ry) || rx <= 0 || ry <= 0) {
+    return null;
+  }
+  const k = 0.5522847498307936;
+  const kx = rx * k;
+  const ky = ry * k;
+  return [
+    {
+      id: uid(),
+      p: { x: cx + rx, y: cy },
+      in: { x: cx + rx, y: cy - ky },
+      out: { x: cx + rx, y: cy + ky },
+    },
+    {
+      id: uid(),
+      p: { x: cx, y: cy + ry },
+      in: { x: cx + kx, y: cy + ry },
+      out: { x: cx - kx, y: cy + ry },
+    },
+    {
+      id: uid(),
+      p: { x: cx - rx, y: cy },
+      in: { x: cx - rx, y: cy + ky },
+      out: { x: cx - rx, y: cy - ky },
+    },
+    {
+      id: uid(),
+      p: { x: cx, y: cy - ry },
+      in: { x: cx - kx, y: cy - ry },
+      out: { x: cx + kx, y: cy - ry },
+    },
+  ];
+};
+
+const parseRectPoints = (rectTag: string): Point[] | null => {
+  const x = Number(attr(rectTag, 'x') ?? '0');
+  const y = Number(attr(rectTag, 'y') ?? '0');
+  const w = Number(attr(rectTag, 'width'));
+  const h = Number(attr(rectTag, 'height'));
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+
+  const rxAttr = attr(rectTag, 'rx');
+  const ryAttr = attr(rectTag, 'ry');
+  let rx = Number(rxAttr ?? ryAttr ?? '0');
+  let ry = Number(ryAttr ?? rxAttr ?? '0');
+  if (!Number.isFinite(rx) || rx < 0) rx = 0;
+  if (!Number.isFinite(ry) || ry < 0) ry = 0;
+  rx = clamp(rx, 0, w / 2);
+  ry = clamp(ry, 0, h / 2);
+
+  if (rx <= 0 || ry <= 0) {
+    return [
+      { id: uid(), p: { x, y }, in: null, out: null },
+      { id: uid(), p: { x: x + w, y }, in: null, out: null },
+      { id: uid(), p: { x: x + w, y: y + h }, in: null, out: null },
+      { id: uid(), p: { x, y: y + h }, in: null, out: null },
+    ];
+  }
+
+  const d = `M ${x + rx} ${y} H ${x + w - rx} A ${rx} ${ry} 0 0 1 ${x + w} ${y + ry} V ${y + h - ry} A ${rx} ${ry} 0 0 1 ${x + w - rx} ${y + h} H ${x + rx} A ${rx} ${ry} 0 0 1 ${x} ${y + h - ry} V ${y + ry} A ${rx} ${ry} 0 0 1 ${x + rx} ${y} Z`;
+  return parsePathD(d)?.points ?? null;
+};
+
+const parseLinePoints = (lineTag: string): Point[] | null => {
+  const x1 = Number(attr(lineTag, 'x1') ?? '0');
+  const y1 = Number(attr(lineTag, 'y1') ?? '0');
+  const x2 = Number(attr(lineTag, 'x2') ?? '0');
+  const y2 = Number(attr(lineTag, 'y2') ?? '0');
+  if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+  if (Math.hypot(x2 - x1, y2 - y1) < 0.000001) return null;
+  return [
+    { id: uid(), p: { x: x1, y: y1 }, in: null, out: null },
+    { id: uid(), p: { x: x2, y: y2 }, in: null, out: null },
+  ];
+};
+
+const parsePointsAttribute = (tag: string): Point[] | null => {
+  const raw = attr(tag, 'points');
+  if (!raw) return null;
+  const nums = (raw.match(/-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi) ?? []).map(Number);
+  if (nums.length < 4 || nums.length % 2 !== 0 || nums.some((n) => !Number.isFinite(n))) return null;
+  const out: Point[] = [];
+  for (let i = 0; i < nums.length; i += 2) {
+    out.push({ id: uid(), p: { x: nums[i], y: nums[i + 1] }, in: null, out: null });
+  }
+  return out;
 };
 
 const parseViewBox = (input: string) => {
@@ -967,7 +1195,7 @@ const autoFitShapesToViewport = (shapes: PathShape[]) => {
 };
 
 const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | null => {
-  const geometryMatches = [...input.matchAll(/<(path|circle)\b[^>]*>/gi)].map((m) => m[0]);
+  const geometryMatches = [...input.matchAll(/<(path|circle|ellipse|rect|line|polyline|polygon)\b[^>]*>/gi)].map((m) => m[0]);
   if (!geometryMatches.length) return null;
   const rootDefaults = parseSvgRootStyleDefaults(input);
 
@@ -975,14 +1203,13 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
 
   for (let k = 0; k < geometryMatches.length; k += 1) {
     const tag = geometryMatches[k];
-    const isPath = /^<path\b/i.test(tag);
-    const isCircle = /^<circle\b/i.test(tag);
-    if (!isPath && !isCircle) continue;
+    const tagName = /^<([a-z]+)/i.exec(tag)?.[1]?.toLowerCase();
+    if (!tagName) continue;
 
     let points: Point[] | null = null;
     let sourceD: string | null = null;
     let closed = false;
-    if (isPath) {
+    if (tagName === 'path') {
       const d = attr(tag, 'd');
       if (!d) continue;
       const parsed = parsePathD(d);
@@ -990,10 +1217,35 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
       points = parsed.points;
       sourceD = d;
       closed = parsed.closed;
-    } else {
+    } else if (tagName === 'circle') {
       points = parseCirclePoints(tag);
       if (!points) continue;
       closed = true;
+    } else if (tagName === 'ellipse') {
+      points = parseEllipsePoints(tag);
+      if (!points) continue;
+      closed = true;
+    } else if (tagName === 'rect') {
+      points = parseRectPoints(tag);
+      if (!points) continue;
+      closed = true;
+    } else if (tagName === 'line') {
+      points = parseLinePoints(tag);
+      if (!points) continue;
+      closed = false;
+    } else if (tagName === 'polyline') {
+      points = parsePointsAttribute(tag);
+      if (!points || points.length < 2) continue;
+      closed = false;
+    } else if (tagName === 'polygon') {
+      points = parsePointsAttribute(tag);
+      if (!points || points.length < 2) continue;
+      const first = points[0].p;
+      const last = points[points.length - 1].p;
+      if (Math.hypot(first.x - last.x, first.y - last.y) < 0.001 && points.length > 2) points.pop();
+      closed = true;
+    } else {
+      continue;
     }
 
     const fillAttr = attr(tag, 'fill') ?? rootDefaults.fill;
@@ -1048,8 +1300,102 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
   return { shapes: vb ? mapped : autoFitShapesToViewport(mapped), viewBox: vb ?? INTERNAL_VIEWBOX };
 };
 
+const DEFAULT_BLANK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-message-square-heart-icon lucide-message-square-heart"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7.5 9.5c0 .687.265 1.383.697 1.844l3.009 3.264a1.14 1.14 0 0 0 .407.314 1 1 0 0 0 .783-.004 1.14 1.14 0 0 0 .398-.31l3.008-3.264A2.77 2.77 0 0 0 16.5 9.5 2.5 2.5 0 0 0 12 8a2.5 2.5 0 0 0-4.5 1.5"/></svg>`;
+
+const DEFAULT_DOCUMENT = (() => {
+  const parsed = parseSvg(DEFAULT_BLANK_SVG);
+  if (parsed) {
+    const shapes = parsed.shapes.map((shape, i) => {
+      if (i === 0) return { ...shape, name: 'Heart', svgId: 'Heart' };
+      if (i === 1) return { ...shape, name: 'SpeechBubble', svgId: 'SpeechBubble' };
+      return shape;
+    });
+    return { ...parsed, shapes };
+  }
+  return {
+    shapes: [createPresetPath('Path 1', 'roundedDiamond', width / 2, height / 2)],
+    viewBox: INTERNAL_VIEWBOX,
+  };
+})();
+
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');
+
+const highlightSvgTagHtml = (tag: string): string => {
+  const tagMatch = tag.match(/^<\s*(\/?)\s*([^\s/>]+)([\s\S]*?)(\/?)\s*>$/);
+  if (!tagMatch) return escapeHtml(tag);
+
+  const [, closeSlash, name, restRaw, selfClose] = tagMatch;
+  const rest = restRaw ?? '';
+  let out = `<span class="tok-punc">&lt;</span>`;
+  if (closeSlash) out += `<span class="tok-punc">/</span>`;
+  out += `<span class="tok-tag">${escapeHtml(name)}</span>`;
+
+  const attrRe = /([:\w-]+)(\s*=\s*)(['"])([\s\S]*?)\3|([:\w-]+)(\s*=\s*)([^\s"'=<>`]+)/g;
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+  while ((m = attrRe.exec(rest))) {
+    if (m.index > cursor) out += escapeHtml(rest.slice(cursor, m.index));
+    if (m[1]) {
+      out += `<span class="tok-attr">${escapeHtml(m[1])}</span>`;
+      out += `<span class="tok-punc">${escapeHtml(m[2] ?? '=')}</span>`;
+      const q = m[3];
+      const v = m[4] ?? '';
+      out += `<span class="tok-string">${escapeHtml(q)}${escapeHtml(v)}${escapeHtml(q)}</span>`;
+    } else {
+      out += `<span class="tok-attr">${escapeHtml(m[5] ?? '')}</span>`;
+      out += `<span class="tok-punc">${escapeHtml(m[6] ?? '=')}</span>`;
+      out += `<span class="tok-number">${escapeHtml(m[7] ?? '')}</span>`;
+    }
+    cursor = attrRe.lastIndex;
+  }
+  if (cursor < rest.length) out += escapeHtml(rest.slice(cursor));
+
+  if (selfClose) out += `<span class="tok-punc">/</span>`;
+  out += `<span class="tok-punc">&gt;</span>`;
+  return out;
+};
+
+const syntaxHighlightSvgHtml = (code: string): string => {
+  const tags = [...code.matchAll(/<[^>]+>/g)];
+  if (!tags.length) return escapeHtml(code);
+  let out = '';
+  let cursor = 0;
+  for (const m of tags) {
+    if (m.index === undefined) continue;
+    const start = m.index;
+    const end = start + m[0].length;
+    if (start > cursor) out += escapeHtml(code.slice(cursor, start));
+    out += highlightSvgTagHtml(m[0]);
+    cursor = end;
+  }
+  if (cursor < code.length) out += escapeHtml(code.slice(cursor));
+  return out;
+};
+
+const extractSvgFromClipboard = (data: DataTransfer | null | undefined): string => {
+  if (!data) return '';
+  const candidates = [data.getData('image/svg+xml'), data.getData('text/plain'), data.getData('text'), data.getData('text/html')].filter(
+    (v) => !!v && !!v.trim(),
+  );
+  for (const raw of candidates) {
+    const text = raw.trim();
+    const direct = text.match(/<svg\b[\s\S]*?<\/svg>/i)?.[0];
+    if (direct) return direct.trim();
+
+    const decoded = text
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/&amp;/gi, '&');
+    const decodedMatch = decoded.match(/<svg\b[\s\S]*?<\/svg>/i)?.[0];
+    if (decodedMatch) return decodedMatch.trim();
+
+    if (/^<\?xml[\s\S]*<svg\b/i.test(text) || /^<svg\b/i.test(text)) return text;
+  }
+  return '';
+};
 
 const getSelectedAnchorRangesInD = (d: string, selectedPoints: number[]) => {
   const selected = new Set(selectedPoints);
@@ -1138,7 +1484,7 @@ const getSelectedAnchorRangesInD = (d: string, selectedPoints: number[]) => {
 };
 
 const wrapEscapedRanges = (text: string, ranges: Array<{ start: number; end: number }>, cls: string) => {
-  if (!ranges.length) return escapeHtml(text);
+  if (!ranges.length) return syntaxHighlightSvgHtml(text);
   const clean = ranges
     .filter((r) => r.end > r.start)
     .sort((a, b) => a.start - b.start);
@@ -1147,27 +1493,27 @@ const wrapEscapedRanges = (text: string, ranges: Array<{ start: number; end: num
   for (const r of clean) {
     const start = clamp(r.start, 0, text.length);
     const end = clamp(r.end, start, text.length);
-    if (start > cursor) out += escapeHtml(text.slice(cursor, start));
-    out += `<span class="${cls}">${escapeHtml(text.slice(start, end))}</span>`;
+    if (start > cursor) out += syntaxHighlightSvgHtml(text.slice(cursor, start));
+    out += `<span class="${cls}">${syntaxHighlightSvgHtml(text.slice(start, end))}</span>`;
     cursor = end;
   }
-  if (cursor < text.length) out += escapeHtml(text.slice(cursor));
+  if (cursor < text.length) out += syntaxHighlightSvgHtml(text.slice(cursor));
   return out;
 };
 
 const highlightSelectedPathHtml = (code: string, selectedPath: number, selectedPoints: number[]) => {
   const re = /<path\b[^>]*>/gi;
   const matches = [...code.matchAll(re)];
-  if (!matches.length || selectedPath < 0 || selectedPath >= matches.length) return escapeHtml(code);
+  if (!matches.length || selectedPath < 0 || selectedPath >= matches.length) return syntaxHighlightSvgHtml(code);
 
   const m = matches[selectedPath];
-  if (m.index === undefined) return escapeHtml(code);
+  if (m.index === undefined) return syntaxHighlightSvgHtml(code);
 
   const start = m.index;
   const end = start + m[0].length;
   const tag = code.slice(start, end);
   const dMatch = /d\s*=\s*(['"])([\s\S]*?)\1/i.exec(tag);
-  let tagHtml = escapeHtml(tag);
+  let tagHtml = syntaxHighlightSvgHtml(tag);
 
   if (dMatch && selectedPoints.length) {
     const value = dMatch[2];
@@ -1180,7 +1526,7 @@ const highlightSelectedPathHtml = (code: string, selectedPath: number, selectedP
     tagHtml = wrapEscapedRanges(tag, valueRanges, 'selected-point-code');
   }
 
-  return `${escapeHtml(code.slice(0, start))}<span class="selected-code">${tagHtml}</span>${escapeHtml(code.slice(end))}`;
+  return `${syntaxHighlightSvgHtml(code.slice(0, start))}<span class="selected-code">${tagHtml}</span>${syntaxHighlightSvgHtml(code.slice(end))}`;
 };
 
 const pathIndexAtCaret = (code: string, caret: number): number | null => {
@@ -1199,7 +1545,7 @@ const pathIndexAtCaret = (code: string, caret: number): number | null => {
 const App = () => {
   const [tool, setTool] = useState<Tool>('select');
   const [drag, setDrag] = useState<DragTarget>(null);
-  const [shapes, setShapes] = useState<PathShape[]>([createPresetPath('Path 1', 'roundedDiamond', width / 2, height / 2)]);
+  const [shapes, setShapes] = useState<PathShape[]>(() => cloneShapes(DEFAULT_DOCUMENT.shapes));
   const [selectedPath, setSelectedPath] = useState(0);
   const [selectedPaths, setSelectedPaths] = useState<number[]>([0]);
   const [pathSelected, setPathSelected] = useState(true);
@@ -1219,7 +1565,7 @@ const App = () => {
   const [undoStack, setUndoStack] = useState<Snapshot[]>([]);
   const [redoStack, setRedoStack] = useState<Snapshot[]>([]);
   const [marquee, setMarquee] = useState<{ start: Vec; current: Vec } | null>(null);
-  const [docViewBox, setDocViewBox] = useState<ViewBox>(INTERNAL_VIEWBOX);
+  const [docViewBox, setDocViewBox] = useState<ViewBox>(DEFAULT_DOCUMENT.viewBox);
   const [copied, setCopied] = useState(false);
   const [pathMetaMenu, setPathMetaMenu] = useState<{
     pathIndex: number;
@@ -1235,7 +1581,9 @@ const App = () => {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [showViewBox, setShowViewBox] = useState(false);
   const [currentColorValue, setCurrentColorValue] = useState('#ffffff');
+  const appShellRef = useRef<HTMLDivElement | null>(null);
   const codeOverlayRef = useRef<HTMLPreElement | null>(null);
+  const codeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const editorSvgRef = useRef<SVGSVGElement | null>(null);
   const codeDebounceRef = useRef<number | null>(null);
   const lastShapesUpdateFromCodeRef = useRef(false);
@@ -1259,11 +1607,9 @@ const App = () => {
   );
   const transformBounds = useMemo(() => getPathBounds(transformPoints), [transformPoints]);
   const transformPivot = useMemo(() => {
-    if (!transformPoints.length) return transformBounds ? { x: transformBounds.cx, y: transformBounds.cy } : { x: 0, y: 0 };
-    const sx = transformPoints.reduce((sum, p) => sum + p.p.x, 0);
-    const sy = transformPoints.reduce((sum, p) => sum + p.p.y, 0);
-    return { x: sx / transformPoints.length, y: sy / transformPoints.length };
-  }, [transformPoints, transformBounds]);
+    if (!transformBounds) return { x: 0, y: 0 };
+    return { x: transformBounds.cx, y: transformBounds.cy };
+  }, [transformBounds]);
   const selectedPathBounds = useMemo(
     () => (pathSelected ? getPathBounds(activePath?.points ?? []) : null),
     [activePath, pathSelected],
@@ -1294,10 +1640,7 @@ const App = () => {
       angle: transformUiAngleRad,
     };
   }, [transformBounds, transformPivot, pathSelected, transformAllPaths, transformUiAngleRad, activePath, transformTargetIndices, drag]);
-  const highlightedCodeHtml = useMemo(
-    () => highlightSelectedPathHtml(codeText, pathSelected ? selectedPath : -1, pathSelected ? selectedPoints : []),
-    [codeText, selectedPath, pathSelected, selectedPoints],
-  );
+  const highlightedCodeHtml = useMemo(() => syntaxHighlightSvgHtml(codeText), [codeText]);
   const editorDocViewBox = useMemo(() => {
     const topLeft = mapPointFromViewBox({ x: docViewBox.minX, y: docViewBox.minY }, docViewBox);
     const bottomRight = mapPointFromViewBox({ x: docViewBox.minX + docViewBox.vbW, y: docViewBox.minY + docViewBox.vbH }, docViewBox);
@@ -1738,6 +2081,41 @@ const App = () => {
     const anchorHit = 6 / zoom;
     const segmentHit = 10 / zoom;
 
+    if (!drag) {
+      let nextCursor = '';
+      if (spaceDown) {
+        nextCursor = 'grab';
+      } else if (tool === 'pen') {
+        nextCursor = 'crosshair';
+      } else if (tool === 'scale') {
+        nextCursor = 'move';
+      } else if (tool === 'select' && pathSelected) {
+        const overPivot = !!transformFrame && dist(pos, { x: transformFrame.cx, y: transformFrame.cy }) <= 8 / zoom;
+        const overStroke = transformTargetIndices.some((idx) => {
+          const shape = shapes[idx];
+          if (!shape) return false;
+          const seg = closestSegment(shape, pos);
+          if (!seg) return false;
+          const strokeW = shape.strokeWidthExplicit ? Math.max(0, shape.strokeWidth) : 0;
+          const threshold = Math.max(8 / zoom, strokeW / 2 + 2 / zoom);
+          return seg.distance <= threshold;
+        });
+        const insideTransform = !!transformFrame && (() => {
+          const unrot = rotateAround(pos, { x: transformFrame.cx, y: transformFrame.cy }, -transformFrame.angle);
+          const eps = 0.0001;
+          return (
+            unrot.x >= transformFrame.minX - eps &&
+            unrot.x <= transformFrame.maxX + eps &&
+            unrot.y >= transformFrame.minY - eps &&
+            unrot.y <= transformFrame.maxY + eps
+          );
+        })();
+        if (overPivot || (insideTransform && overStroke)) nextCursor = 'move';
+        else nextCursor = 'default';
+      }
+      e.currentTarget.style.cursor = nextCursor;
+    }
+
     if (tool === 'pen' && activePath) {
       const anchorIndex = activePath.points.findIndex((pt) => dist(pt.p, pos) < anchorHit);
       if (anchorIndex >= 0) {
@@ -1908,11 +2286,11 @@ const App = () => {
     }
   };
 
-  const applyCodeText = (text: string, fromUser = false) => {
+  const applyCodeText = (text: string, fromUser = false): boolean => {
     const parsed = parseSvg(text);
     if (!parsed) {
-      if (fromUser) setCodeError('Unable to parse SVG. Use <path> (M/L/H/V/C/Z) and/or <circle> tags.');
-      return;
+      if (fromUser) setCodeError('Unable to parse SVG. Supported tags: <path>, <circle>, <ellipse>, <rect>, <line>, <polyline>, <polygon>.');
+      return false;
     }
     if (fromUser) pushUndo();
     lastShapesUpdateFromCodeRef.current = true;
@@ -1925,7 +2303,25 @@ const App = () => {
     setSelectedPoint(0);
     setSelectedPoints([0]);
     enterTransformMode();
+    return true;
   };
+
+  useEffect(() => {
+    const onWindowPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        const isEditable = target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+        if (isEditable && target !== codeTextareaRef.current) return;
+      }
+      const pasted = extractSvgFromClipboard(e.clipboardData);
+      if (!pasted) return;
+      if (!importPastedSvg(pasted)) return;
+      e.preventDefault();
+    };
+    document.addEventListener('paste', onWindowPaste, true);
+    return () => document.removeEventListener('paste', onWindowPaste, true);
+  }, [importPastedSvg]);
 
   const updateActiveStyle = (patch: Partial<Pick<PathShape, 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'closed'>>) => {
     pushUndo();
@@ -1968,8 +2364,53 @@ const App = () => {
   };
 
   const enterTransformMode = () => {
-    setTool('scale');
     setPenHover(null);
+  };
+
+  const clearSelection = () => {
+    setPathSelected(false);
+    setSelectedPaths([]);
+    setSelectedPoints([]);
+    setPenHover(null);
+  };
+
+  const isInsideTransformFrame = (pos: Vec) => {
+    if (!transformFrame) return false;
+    const unrot = rotateAround(pos, { x: transformFrame.cx, y: transformFrame.cy }, -transformFrame.angle);
+    const eps = 0.0001;
+    return (
+      unrot.x >= transformFrame.minX - eps &&
+      unrot.x <= transformFrame.maxX + eps &&
+      unrot.y >= transformFrame.minY - eps &&
+      unrot.y <= transformFrame.maxY + eps
+    );
+  };
+
+  const isOverSelectedStroke = (pos: Vec) => {
+    if (!pathSelected) return false;
+    const baseThreshold = 8 / zoom;
+    return transformTargetIndices.some((idx) => {
+      const shape = shapes[idx];
+      if (!shape) return false;
+      const seg = closestSegment(shape, pos);
+      if (!seg) return false;
+      const strokeW = shape.strokeWidthExplicit ? Math.max(0, shape.strokeWidth) : 0;
+      const threshold = Math.max(baseThreshold, strokeW / 2 + 2 / zoom);
+      return seg.distance <= threshold;
+    });
+  };
+
+  const startMoveDrag = (startPos: Vec, pointerId: number, target: SVGGeometryElement) => {
+    pushUndo();
+    setDrag({
+      kind: 'move',
+      pathIndex: selectedPath,
+      affectAll: transformAllPaths || selectedPaths.length > 1,
+      targetPathIndices: transformTargetIndices,
+      startPos,
+      baseShapes: cloneShapes(shapes),
+    });
+    target.setPointerCapture(pointerId);
   };
 
   const syncSelectionFromCodeCursor = (el: HTMLTextAreaElement) => {
@@ -1996,6 +2437,59 @@ const App = () => {
       setCopied(false);
     }
   };
+
+  const saveSvgFile = (filename: string) => {
+    const content = formatSvgCode(codeText) || codeText;
+    if (!content.trim()) return;
+    const trimmed = filename.trim() || 'drawing.svg';
+    const safeName = /\.svg$/i.test(trimmed) ? trimmed : `${trimmed}.svg`;
+    const blob = new Blob([content], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safeName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const clearDocument = () => {
+    pushUndo();
+    const defaults = cloneShapes(DEFAULT_DOCUMENT.shapes);
+    setShapes(defaults);
+    setSelectedPath(0);
+    setSelectedPaths([0]);
+    setPathSelected(true);
+    setSelectedPoint(0);
+    setSelectedPoints([0]);
+    setTransformAllPaths(false);
+    setDocViewBox(DEFAULT_DOCUMENT.viewBox);
+    setZoom(1);
+    setViewOrigin({ x: 0, y: 0 });
+    setCodeError('');
+    setTool('select');
+    setPenHover(null);
+  };
+
+  const formatCodeInPane = () => {
+    const formatted = formatSvgCode(codeText);
+    if (!formatted) return;
+    setCodeText(formatted);
+    applyCodeText(formatted, true);
+  };
+
+  function importPastedSvg(pasted: string): boolean {
+    if (!pasted) return false;
+    if (!applyCodeText(pasted, true)) return false;
+    setCodeText(pasted);
+    if (codeTextareaRef.current) {
+      codeTextareaRef.current.focus();
+      const pos = pasted.length;
+      codeTextareaRef.current.setSelectionRange(pos, pos);
+    }
+    return true;
+  }
 
   const openPathMetaMenu = (pathIndex: number, rect: DOMRect) => {
     const path = shapes[pathIndex];
@@ -2091,6 +2585,7 @@ const App = () => {
 
   return (
     <div
+      ref={appShellRef}
       className="app-shell"
       onPointerDown={() => {
         setPathMetaMenu(null);
@@ -2102,6 +2597,10 @@ const App = () => {
     >
       <TopBar
         onOpenAbout={() => setAboutOpen(true)}
+        onSaveSvg={saveSvgFile}
+        onCopySvg={copySvgCode}
+        onClearSvg={clearDocument}
+        copied={copied}
       />
 
       <div
@@ -2192,9 +2691,11 @@ const App = () => {
           <svg
             ref={editorSvgRef}
             className={spaceDown ? 'editor pan' : tool === 'pen' ? 'editor pen' : tool === 'scale' ? 'editor scale' : 'editor'}
+            tabIndex={0}
             viewBox={`${viewOrigin.x} ${viewOrigin.y} ${width / zoom} ${height / zoom}`}
             style={{ color: currentColorValue }}
             onPointerDown={(e) => {
+              e.currentTarget.focus();
               if (!spaceDown) return;
               e.preventDefault();
               setDrag({
@@ -2206,10 +2707,11 @@ const App = () => {
             }}
             onPointerMove={onCanvasMove}
             onPointerUp={() => setDrag(null)}
-            onPointerLeave={() => {
+            onPointerLeave={(e) => {
               setDrag(null);
               setCursorZoomFocus(null);
               if (tool === 'pen') setPenHover(null);
+              e.currentTarget.style.cursor = '';
             }}
             onClick={onCanvasClick}
           >
@@ -2232,6 +2734,7 @@ const App = () => {
               onPointerDown={(e) => {
                 if (spaceDown) return;
                 e.stopPropagation();
+                clearSelection();
                 if (tool !== 'select') return;
                 const svg = e.currentTarget.ownerSVGElement;
                 if (!svg) return;
@@ -2460,7 +2963,7 @@ const App = () => {
               </g>
             ))}
 
-            {tool === 'scale' && transformFrame ? (
+            {pathSelected && (tool === 'scale' || tool === 'select') && transformFrame ? (
               <>
                 {(() => {
                   const b = transformFrame;
@@ -2474,6 +2977,14 @@ const App = () => {
                   const rightMid = rot({ x: b.maxX, y: b.cy });
                   const bottomMid = rot({ x: b.cx, y: b.maxY });
                   const leftMid = rot({ x: b.minX, y: b.cy });
+                  const sizeLabel = `${(b.maxX - b.minX).toFixed(1)} x ${(b.maxY - b.minY).toFixed(1)}`;
+                  const labelFontSize = 9 / zoom;
+                  const labelWidth = (sizeLabel.length * 5.5 + 8) / zoom;
+                  const labelHeight = 14 / zoom;
+                  const down = { x: -Math.sin(b.angle), y: Math.cos(b.angle) };
+                  const labelOffset = 5 / zoom + labelHeight / 2;
+                  const labelCx = bottomMid.x + down.x * labelOffset;
+                  const labelCy = bottomMid.y + down.y * labelOffset;
                   const rotArmEnd = rot({ x: b.cx, y: b.minY - 18 / zoom });
                   const rotHandle = rot({ x: b.cx, y: b.minY - 22 / zoom });
                   const axisX1 = rot({ x: b.cx - 8 / zoom, y: b.cy });
@@ -2488,19 +2999,16 @@ const App = () => {
                   onPointerDown={(e) => {
                     if (spaceDown) return;
                     e.stopPropagation();
-                    pushUndo();
                     const svg = e.currentTarget.ownerSVGElement;
                     if (!svg) return;
                     const startPos = toLocal(e.clientX, e.clientY, svg);
-                    setDrag({
-                      kind: 'move',
-                      pathIndex: selectedPath,
-                      affectAll: transformAllPaths || selectedPaths.length > 1,
-                      targetPathIndices: transformTargetIndices,
-                      startPos,
-                      baseShapes: cloneShapes(shapes),
-                    });
-                    e.currentTarget.setPointerCapture(e.pointerId);
+                    if (tool === 'select') {
+                      if (!isInsideTransformFrame(startPos) || !isOverSelectedStroke(startPos)) {
+                        clearSelection();
+                        return;
+                      }
+                    }
+                    startMoveDrag(startPos, e.pointerId, e.currentTarget);
                   }}
                 />
                 <path
@@ -2508,6 +3016,27 @@ const App = () => {
                   className="scale-box"
                   vectorEffect="non-scaling-stroke"
                 />
+                <g className="scale-size-tag" pointerEvents="none">
+                  <rect
+                    x={labelCx - labelWidth / 2}
+                    y={labelCy - labelHeight / 2}
+                    width={labelWidth}
+                    height={labelHeight}
+                    rx={3 / zoom}
+                    ry={3 / zoom}
+                    className="scale-size-tag-box"
+                  />
+                  <text
+                    x={labelCx}
+                    y={labelCy}
+                    className="scale-size-tag-text"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    style={{ fontSize: `${labelFontSize}px` }}
+                  >
+                    {sizeLabel}
+                  </text>
+                </g>
                 <line
                   x1={tl.x}
                   y1={tl.y}
@@ -2813,6 +3342,20 @@ const App = () => {
                     e.currentTarget.setPointerCapture(e.pointerId);
                   }}
                 />
+                <circle
+                  cx={b.cx}
+                  cy={b.cy}
+                  r={8 / zoom}
+                  className="scale-pivot-hit"
+                  onPointerDown={(e) => {
+                    if (spaceDown) return;
+                    e.stopPropagation();
+                    const svg = e.currentTarget.ownerSVGElement;
+                    if (!svg) return;
+                    const startPos = toLocal(e.clientX, e.clientY, svg);
+                    startMoveDrag(startPos, e.pointerId, e.currentTarget);
+                  }}
+                />
                 <circle cx={b.cx} cy={b.cy} r={3.2 / zoom} className="scale-pivot" vectorEffect="non-scaling-stroke" />
                 <line
                   x1={axisX1.x}
@@ -2885,14 +3428,16 @@ const App = () => {
               ? 'Pen tool: hover anchor to delete point, hover segment to add point, then click. Hold Space to pan.'
               : tool === 'scale'
                 ? 'Scale tool: drag inside box to move, drag corners to scale. Shift = uniform, Alt/Option = center scale. Hold Space to pan.'
-                : 'Select tool: drag anchors/handles to edit curvature. Hold Space to pan.'}
+                : 'Select tool: drag anchors/handles to edit curvature. Transform box stays visible for selected paths. Hold Space to pan.'}
           </p>
         </section>
 
         <CodePane
           copied={copied}
           onCopy={copySvgCode}
+          onFormatCode={formatCodeInPane}
           codeOverlayRef={codeOverlayRef}
+          codeTextareaRef={codeTextareaRef}
           highlightedCodeHtml={highlightedCodeHtml}
           codeText={codeText}
           codeError={codeError}
@@ -2908,12 +3453,9 @@ const App = () => {
           onCodeKeyUp={(el) => syncSelectionFromCodeCursor(el)}
           onCodeSelect={(el) => syncSelectionFromCodeCursor(el)}
           onCodePaste={(e) => {
-            const pasted = e.clipboardData.getData('text');
-            const parsed = parseSvg(pasted);
-            if (parsed) {
+            const pasted = extractSvgFromClipboard(e.clipboardData);
+            if (importPastedSvg(pasted)) {
               e.preventDefault();
-              setCodeText(pasted);
-              applyCodeText(pasted, true);
             }
           }}
           onCodeScroll={(el) => {
@@ -2995,6 +3537,7 @@ const App = () => {
           <label>
             ID
             <input
+              autoFocus
               value={pathMetaMenu.idValue}
               onChange={(e) => setPathMetaMenu((m) => (m ? { ...m, idValue: e.target.value } : m))}
               placeholder="optional"

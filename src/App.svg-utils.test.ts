@@ -55,9 +55,38 @@ describe('SVG utils', () => {
     expect(fuse?.points.some((pt) => pt.in !== null || pt.out !== null)).toBe(true);
   });
 
+  it('parseSvg supports quadratic and smooth cubic path commands', () => {
+    const qstSvg = `<svg viewBox="0 0 24 24"><path d="M2 2 Q 12 0 22 22 T 2 22 M2 12 C 6 2 18 2 22 12 S 18 22 2 12"/></svg>`;
+    const parsed = parseSvg(qstSvg);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.shapes).toHaveLength(1);
+    expect(parsed?.shapes[0]?.points.length).toBeGreaterThanOrEqual(5);
+    expect(parsed?.shapes[0]?.points.some((pt) => pt.in !== null || pt.out !== null)).toBe(true);
+  });
+
+  it('parseSvg imports rect/ellipse/line/polyline/polygon tags', () => {
+    const primitivesSvg = `<svg viewBox="0 0 24 24">
+      <rect x="2" y="2" width="8" height="6"/>
+      <rect x="12" y="2" width="10" height="8" rx="2" ry="2"/>
+      <ellipse cx="6" cy="16" rx="4" ry="2"/>
+      <line x1="12" y1="13" x2="22" y2="13"/>
+      <polyline points="12,16 16,18 22,16"/>
+      <polygon points="2,20 6,22 10,20"/>
+    </svg>`;
+    const parsed = parseSvg(primitivesSvg);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.shapes).toHaveLength(6);
+    expect(parsed?.shapes[0]?.closed).toBe(true);
+    expect(parsed?.shapes[1]?.points.some((pt) => pt.in !== null || pt.out !== null)).toBe(true);
+    expect(parsed?.shapes[2]?.closed).toBe(true);
+    expect(parsed?.shapes[3]?.closed).toBe(false);
+    expect(parsed?.shapes[4]?.closed).toBe(false);
+    expect(parsed?.shapes[5]?.closed).toBe(true);
+  });
+
   it('parseSvg rejects unsupported path commands instead of mis-parsing', () => {
-    const quadraticSvg = `<svg viewBox="0 0 24 24"><path d="M2 2 Q 12 0 22 22"/></svg>`;
-    expect(parseSvg(quadraticSvg)).toBeNull();
+    const unsupportedSvg = `<svg viewBox="0 0 24 24"><path d="M2 2 R 12 0 22 22"/></svg>`;
+    expect(parseSvg(unsupportedSvg)).toBeNull();
   });
 
   it('parseSvg inherits root fill/stroke defaults', () => {

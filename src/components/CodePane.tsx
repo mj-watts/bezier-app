@@ -4,7 +4,9 @@ import { type ClipboardEvent, type RefObject } from 'react';
 type Props = {
   copied: boolean;
   onCopy: () => void;
+  onFormatCode: () => void;
   codeOverlayRef: RefObject<HTMLPreElement | null>;
+  codeTextareaRef: RefObject<HTMLTextAreaElement | null>;
   highlightedCodeHtml: string;
   codeText: string;
   codeError: string;
@@ -23,7 +25,9 @@ type Props = {
 const CodePane = ({
   copied,
   onCopy,
+  onFormatCode,
   codeOverlayRef,
+  codeTextareaRef,
   highlightedCodeHtml,
   codeText,
   codeError,
@@ -55,10 +59,15 @@ const CodePane = ({
 
       <aside className="right-pane">
         <div className="code-header">
-          <h2>Live SVG</h2>
-          <button className="control-btn icon-only" onClick={onCopy} title={copied ? 'Copied' : 'Copy SVG'}>
-            <Copy />
-          </button>
+          <h2>SVG code</h2>
+          <div className="code-header-actions">
+            <button className="control-btn text-sm" onClick={onFormatCode} title="Format SVG code now">
+              Format
+            </button>
+            <button className="control-btn icon-only" onClick={onCopy} title={copied ? 'Copied' : 'Copy SVG'}>
+              <Copy />
+            </button>
+          </div>
         </div>
 
         <div className="code-wrap">
@@ -70,6 +79,7 @@ const CodePane = ({
           />
           <textarea
             id="live-svg-code"
+            ref={codeTextareaRef}
             value={codeText}
             onChange={(e) => onCodeChange(e.target.value)}
             onClick={(e) => onCodeClick(e.currentTarget)}

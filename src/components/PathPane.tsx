@@ -1,4 +1,4 @@
-import { Shapes, Trash2, X } from 'lucide-react';
+import { Check, Shapes, Trash2, X } from 'lucide-react';
 import { type RefObject } from 'react';
 
 type ShapeTab = {
@@ -71,7 +71,7 @@ const PathPane = ({
           ) : (
             <>
               <button
-                className="control-btn confirm-text"
+                className="icon-btn confirm-text"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -79,7 +79,7 @@ const PathPane = ({
                 }}
                 title="Confirm Delete"
               >
-                Confirm delete
+                <Check />
               </button>
               <button
                 className="icon-btn confirm-no"

@@ -120,3 +120,44 @@
 .style-menu-current-color-btn {
   width: 100%;
 }
+
+.save-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 260px;
+  padding: 10px;
+  border-radius: 6px;
+  background: #151b23;
+  border: 1px solid #2b3543;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.45);
+  display: grid;
+  gap: 8px;
+}
+
+.save-menu h3 {
+  margin: 0;
+  font-size: 0.86rem;
+  color: #e7edf5;
+  font-weight: 800;
+}
+
+.save-menu label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: #b8c4d3;
+  font-weight: 700;
+}
+
+.save-menu input {
+  border: 1px solid #2f3a49;
+  border-radius: 4px;
+  background: #10161d;
+  color: #e3ebf7;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.save-menu input:focus {
+  border-color: var(--accent-yellow);
+}
