@@ -22,6 +22,7 @@ type Props = {
   canUndo: boolean;
   canRedo: boolean;
   renderThresholdControl: ReactNode;
+  renderCurrentColorControl: ReactNode;
 };
 
 const ControlsBar = ({
@@ -43,6 +44,7 @@ const ControlsBar = ({
   canUndo,
   canRedo,
   renderThresholdControl,
+  renderCurrentColorControl,
 }: Props) => {
   return (
     <div className="controls-row">
@@ -67,6 +69,10 @@ const ControlsBar = ({
           {pathSelected ? 'Simplify Path' : 'Simplify SVG'}
         </button>
       </div>
+
+      <span className="control-group-divider" aria-hidden="true" />
+
+      <div className="control-group">{renderCurrentColorControl}</div>
 
       {tool === 'scale' ? (
         <label>

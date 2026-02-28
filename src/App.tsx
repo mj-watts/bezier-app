@@ -992,18 +992,22 @@ const App = () => {
   } | null>(null);
   const [styleMenu, setStyleMenu] = useState<{ kind: StylePanel; x: number; y: number } | null>(null);
   const [shapeMenu, setShapeMenu] = useState<{ x: number; y: number } | null>(null);
+  const [currentColorMenu, setCurrentColorMenu] = useState<{ x: number; y: number } | null>(null);
   const [confirmDeletePath, setConfirmDeletePath] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [showViewBox, setShowViewBox] = useState(false);
+  const [currentColorValue, setCurrentColorValue] = useState('#ffffff');
   const codeOverlayRef = useRef<HTMLPreElement | null>(null);
   const editorSvgRef = useRef<SVGSVGElement | null>(null);
   const codeDebounceRef = useRef<number | null>(null);
   const lastShapesUpdateFromCodeRef = useRef(false);
   const shapeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const styleTriggerRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const currentColorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const pathMetaMenuRef = useRef<HTMLFormElement | null>(null);
   const shapeMenuRef = useRef<HTMLDivElement | null>(null);
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
+  const currentColorMenuRef = useRef<HTMLDivElement | null>(null);
 
   const activePath = shapes[selectedPath];
   const transformTargetIndices = useMemo(() => {
@@ -1696,6 +1700,10 @@ const App = () => {
     () => parseColorToRgba(activePath.stroke, { r: 121, g: 192, b: 255, a: 1 }),
     [activePath.stroke],
   );
+  const activeCurrentColor = useMemo(
+    () => parseColorToRgba(currentColorValue, { r: 255, g: 255, b: 255, a: 1 }),
+    [currentColorValue],
+  );
 
   const strokeControlDisabled =
     pathSelected && selectedPaths.length
@@ -1773,6 +1781,19 @@ const App = () => {
     setStyleMenu({ kind, x, y });
     setShapeMenu(null);
     setPathMetaMenu(null);
+    setCurrentColorMenu(null);
+  };
+
+  const openCurrentColorMenu = (rect: DOMRect) => {
+    const menuW = 250;
+    const menuH = 198;
+    const pad = 8;
+    const x = clamp(rect.left, pad, Math.max(pad, window.innerWidth - menuW - pad));
+    const y = clamp(rect.bottom + 6, pad, Math.max(pad, window.innerHeight - menuH - pad));
+    setCurrentColorMenu({ x, y });
+    setShapeMenu(null);
+    setStyleMenu(null);
+    setPathMetaMenu(null);
   };
 
   useEffect(() => {
@@ -1789,24 +1810,27 @@ const App = () => {
   }, [aboutOpen]);
 
   useEffect(() => {
-    if (!pathMetaMenu && !shapeMenu && !styleMenu) return;
+    if (!pathMetaMenu && !shapeMenu && !styleMenu && !currentColorMenu) return;
     const onWindowPointerDown = (e: PointerEvent) => {
       const target = e.target as Node | null;
       if (!target) return;
       const inPathMeta = !!pathMetaMenuRef.current?.contains(target);
       const inShapeMenu = !!shapeMenuRef.current?.contains(target);
       const inStyleMenu = !!styleMenuRef.current?.contains(target);
+      const inCurrentColorMenu = !!currentColorMenuRef.current?.contains(target);
       const inShapeTrigger = !!shapeTriggerRef.current?.contains(target);
       const inStyleTrigger = styleTriggerRefs.current.some((el) => !!el?.contains(target));
-      if (inPathMeta || inShapeMenu || inStyleMenu || inShapeTrigger || inStyleTrigger) return;
+      const inCurrentColorTrigger = !!currentColorTriggerRef.current?.contains(target);
+      if (inPathMeta || inShapeMenu || inStyleMenu || inCurrentColorMenu || inShapeTrigger || inStyleTrigger || inCurrentColorTrigger) return;
       setPathMetaMenu(null);
       setShapeMenu(null);
       setStyleMenu(null);
+      setCurrentColorMenu(null);
       setConfirmDeletePath(false);
     };
     window.addEventListener('pointerdown', onWindowPointerDown, true);
     return () => window.removeEventListener('pointerdown', onWindowPointerDown, true);
-  }, [pathMetaMenu, shapeMenu, styleMenu]);
+  }, [pathMetaMenu, shapeMenu, styleMenu, currentColorMenu]);
 
   return (
     <div
@@ -1815,6 +1839,7 @@ const App = () => {
         setPathMetaMenu(null);
         setShapeMenu(null);
         setStyleMenu(null);
+        setCurrentColorMenu(null);
         setConfirmDeletePath(false);
       }}
     >
@@ -1843,6 +1868,7 @@ const App = () => {
           setShapeMenu({ x, y });
           setStyleMenu(null);
           setPathMetaMenu(null);
+          setCurrentColorMenu(null);
         }}
         confirmDeletePath={confirmDeletePath}
         canDeletePath={canDeletePath}
@@ -1924,12 +1950,29 @@ const App = () => {
                 onChange={(v) => setSimplifyThreshold(Math.round(v))}
               />
             }
+            renderCurrentColorControl={
+              <button
+                ref={currentColorTriggerRef}
+                className={`control-btn text-sm current-color-btn${currentColorMenu ? ' active' : ''}`}
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (currentColorMenu) setCurrentColorMenu(null);
+                  else openCurrentColorMenu(e.currentTarget.getBoundingClientRect());
+                }}
+              >
+                <span className="current-color-swatch" style={{ background: currentColorValue }} />
+                <span>currentColor</span>
+              </button>
+            }
           />
 
           <svg
             ref={editorSvgRef}
             className={spaceDown ? 'editor pan' : tool === 'pen' ? 'editor pen' : tool === 'scale' ? 'editor scale' : 'editor'}
             viewBox={`${viewOrigin.x} ${viewOrigin.y} ${width / zoom} ${height / zoom}`}
+            style={{ color: currentColorValue }}
             onPointerDown={(e) => {
               if (!spaceDown) return;
               e.preventDefault();
@@ -2686,6 +2729,22 @@ const App = () => {
               />
             </label>
           ) : null}
+        </div>
+      ) : null}
+      {currentColorMenu ? (
+        <div
+          ref={currentColorMenuRef}
+          className="style-menu current-color-menu"
+          style={{ left: `${currentColorMenu.x}px`, top: `${currentColorMenu.y}px` }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <h3>currentColor</h3>
+          <label>
+            <HexAlphaColorPicker
+              color={rgbaToHexAlpha(activeCurrentColor)}
+              onChange={(hex) => setCurrentColorValue(rgbaToCss(parseColorToRgba(hex, activeCurrentColor)))}
+            />
+          </label>
         </div>
       ) : null}
       <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
