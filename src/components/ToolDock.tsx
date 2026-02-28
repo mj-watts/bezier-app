@@ -1,4 +1,4 @@
-import { Expand, Merge, MousePointer2, PaintBucket, PenLine, PenTool, Shapes, SquareDashed, WandSparkles } from 'lucide-react';
+import { Expand, Library, Merge, MousePointer2, PaintBucket, PenLine, PenTool, Shapes, SquareDashed, WandSparkles } from 'lucide-react';
 import Tooltip from '@mui/material/Tooltip';
 import { type RefObject } from 'react';
 
@@ -13,7 +13,9 @@ type Props = {
   onPenTool: () => void;
   onScaleTool: () => void;
   shapeTriggerRef: RefObject<HTMLButtonElement | null>;
+  lucideTriggerRef: RefObject<HTMLButtonElement | null>;
   onOpenShapeMenu: (rect: DOMRect) => void;
+  onOpenLucideMenu: (rect: DOMRect) => void;
   onToggleStyleMenu: (kind: StylePanel, rect: DOMRect) => void;
   onSmooth: () => void;
   onMerge: () => void;
@@ -29,7 +31,9 @@ const ToolDock = ({
   onPenTool,
   onScaleTool,
   shapeTriggerRef,
+  lucideTriggerRef,
   onOpenShapeMenu,
+  onOpenLucideMenu,
   onToggleStyleMenu,
   onSmooth,
   onMerge,
@@ -64,6 +68,19 @@ const ToolDock = ({
           }}
         >
           <Shapes />
+        </button>
+      </Tooltip>
+      <Tooltip title="Add Lucide Icon" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
+        <button
+          ref={lucideTriggerRef}
+          className="tool"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenLucideMenu(e.currentTarget.getBoundingClientRect());
+          }}
+        >
+          <Library />
         </button>
       </Tooltip>
       <div className="tool-divider" />

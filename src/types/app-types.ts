@@ -15,6 +15,7 @@ export type PathMetaMenuState = {
 export type StyleMenuState = { kind: StylePanel; x: number; y: number };
 export type ShapeMenuState = { x: number; y: number };
 export type CurrentColorMenuState = { x: number; y: number };
+export type LucideMenuState = { x: number; y: number };
 
 export type TransformFrame = {
   minX: number;

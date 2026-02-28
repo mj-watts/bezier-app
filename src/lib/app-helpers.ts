@@ -12,6 +12,7 @@ import {
 import {
   type CurrentColorMenuState,
   type CursorZoomFocus,
+  type LucideMenuState,
   type PathMetaMenuState,
   type ShapeMenuState,
   type StyleMenuState,
@@ -117,6 +118,11 @@ export const createCurrentColorMenuState = (rect: DOMRect, viewport: ViewportSiz
 export const createShapeMenuState = (rect: DOMRect, viewport: ViewportSize): ShapeMenuState => ({
   x: clampMenuX(rect.left, 208, viewport.width),
   y: clampMenuY(rect.bottom + 6, 58, viewport.height),
+});
+
+export const createLucideMenuState = (rect: DOMRect, viewport: ViewportSize): LucideMenuState => ({
+  x: clampMenuX(rect.left, 320, viewport.width),
+  y: clampMenuY(rect.bottom + 6, 420, viewport.height),
 });
 
 export const saveSvgFile = (codeText: string, filename: string) => {

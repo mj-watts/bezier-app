@@ -67,12 +67,25 @@ textarea {
 .topbar-inline-confirm {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+  width: 100%;
 }
 
 .topbar-inline-confirm .icon-btn {
   width: 34px;
   height: 34px;
+}
+
+.topbar-confirm-slot {
+  width: 82px;
+  min-width: 82px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.topbar-confirm-slot .control-btn {
+  width: 100%;
 }
 
 .brand-trigger {
@@ -280,7 +293,7 @@ textarea {
     minmax(260px, 1fr)
     8px
     minmax(260px, var(--code-pane-width, 420px))
-    minmax(160px, calc(var(--code-pane-width, 420px) / 2));
+    minmax(148px, calc(var(--code-pane-width, 420px) / 3));
 }
 
 .tool-dock {
@@ -315,6 +328,7 @@ textarea {
 
 .paths-pane {
   min-height: 0;
+  min-width: 0;
   padding: 12px;
   display: grid;
   grid-template-rows: auto 1fr;
@@ -325,26 +339,27 @@ textarea {
 
 .paths-pane-header {
   min-height: 42px;
+  min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
-}
-
-.paths-pane-header h2 {
-  margin: 0;
-  font-size: 1rem;
+  overflow: hidden;
 }
 
 .paths-pane-actions {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 90px;
+  min-width: 90px;
   gap: 8px;
 }
 
 .paths-list {
   min-height: 0;
   overflow: auto;
+  overflow-x: hidden;
   display: grid;
   align-content: start;
   gap: 8px;
@@ -353,8 +368,14 @@ textarea {
 
 .paths-list-tab {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  display: block;
   justify-content: flex-start;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pane-splitter {
@@ -965,4 +986,8 @@ textarea {
 
 .code-overlay .tok-number {
   color: #f7a8ff;
+}
+
+.code-overlay .tok-text {
+  color: #c9ddf4;
 }

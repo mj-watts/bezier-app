@@ -7,12 +7,14 @@ import PathPane from './components/PathPane';
 import ToolDock from './components/ToolDock';
 import TopBar from './components/TopBar';
 import CurrentColorMenu from './components/menus/CurrentColorMenu';
+import LucideIconMenu from './components/menus/LucideIconMenu';
 import PathMetaMenu from './components/menus/PathMetaMenu';
 import ShapeMenu from './components/menus/ShapeMenu';
 import StyleMenu from './components/menus/StyleMenu';
 import {
   type CurrentColorMenuState,
   type CursorZoomFocus,
+  type LucideMenuState,
   type MarqueeState,
   type PaneDrag,
   type PathMetaMenuState,
@@ -63,10 +65,12 @@ import {
   height,
   width,
 } from './lib/editor-core';
+import { loadLucideIconSvg } from './lib/lucide-icons';
 import {
   clampOriginForZoom,
   computeZoomFocusFromSelection,
   createCurrentColorMenuState,
+  createLucideMenuState,
   createPathMetaMenuState,
   createShapeMenuState,
   createStyleMenuState,
@@ -106,6 +110,7 @@ const App = () => {
   const [pathMetaMenu, setPathMetaMenu] = useState<PathMetaMenuState | null>(null);
   const [styleMenu, setStyleMenu] = useState<StyleMenuState | null>(null);
   const [shapeMenu, setShapeMenu] = useState<ShapeMenuState | null>(null);
+  const [lucideMenu, setLucideMenu] = useState<LucideMenuState | null>(null);
   const [currentColorMenu, setCurrentColorMenu] = useState<CurrentColorMenuState | null>(null);
   const [confirmDeletePath, setConfirmDeletePath] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -118,10 +123,12 @@ const App = () => {
   const codeDebounceRef = useRef<number | null>(null);
   const lastShapesUpdateFromCodeRef = useRef(false);
   const shapeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const lucideTriggerRef = useRef<HTMLButtonElement | null>(null);
   const styleTriggerRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const currentColorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const pathMetaMenuRef = useRef<HTMLFormElement | null>(null);
   const shapeMenuRef = useRef<HTMLDivElement | null>(null);
+  const lucideMenuRef = useRef<HTMLDivElement | null>(null);
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
   const currentColorMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -420,14 +427,29 @@ const App = () => {
     toLocalPoint(clientX, clientY, target, viewOrigin, zoom);
 
   const pathDs = useMemo(() => shapes.map((shape) => pathData(shape.points, shape.closed)), [shapes]);
+  const defaultDocCode = useMemo(() => serializeSvg(DEFAULT_DOCUMENT.shapes, DEFAULT_DOCUMENT.viewBox), []);
+  const hasDefaultViewBox =
+    docViewBox.minX === DEFAULT_DOCUMENT.viewBox.minX &&
+    docViewBox.minY === DEFAULT_DOCUMENT.viewBox.minY &&
+    docViewBox.vbW === DEFAULT_DOCUMENT.viewBox.vbW &&
+    docViewBox.vbH === DEFAULT_DOCUMENT.viewBox.vbH;
+  const isInitialDocument = hasDefaultViewBox && serializeSvg(shapes, DEFAULT_DOCUMENT.viewBox) === defaultDocCode;
+  const toIconLabel = (name: string) =>
+    name
+      .split('-')
+      .filter(Boolean)
+      .map((part) => part[0]?.toUpperCase() + part.slice(1))
+      .join(' ');
 
   const addPresetPath = (preset: ShapePreset) => {
     pushUndo();
     const centerX = viewOrigin.x + width / (2 * zoom);
     const centerY = viewOrigin.y + height / (2 * zoom);
+    const replaceInitial = isInitialDocument;
     setShapes((curr) => {
-      const created = createPresetPath(`Path ${curr.length + 1}`, preset, centerX, centerY);
-      const next = [...curr, created];
+      const base = replaceInitial ? [] : curr;
+      const created = createPresetPath(`Path ${base.length + 1}`, preset, centerX, centerY);
+      const next = [...base, created];
       const idx = next.length - 1;
       setSelectedPath(idx);
       setSelectedPaths([idx]);
@@ -437,6 +459,54 @@ const App = () => {
       return next;
     });
     setShapeMenu(null);
+    enterTransformMode();
+  };
+
+  const addLucideIcon = async (iconName: string) => {
+    const svg = await loadLucideIconSvg(iconName);
+    if (!svg) return;
+    const parsed = parseSvg(svg);
+    if (!parsed || !parsed.shapes.length) return;
+
+    const sourceBounds = getPathBounds(parsed.shapes.flatMap((shape) => shape.points));
+    if (!sourceBounds) return;
+
+    const centerX = viewOrigin.x + width / (2 * zoom);
+    const centerY = viewOrigin.y + height / (2 * zoom);
+    const dx = centerX - sourceBounds.cx;
+    const dy = centerY - sourceBounds.cy;
+    const label = toIconLabel(iconName);
+    const replaceInitial = isInitialDocument;
+
+    pushUndo();
+    setShapes((curr) => {
+      const base = replaceInitial ? [] : curr;
+      const startIndex = base.length;
+      const created = parsed.shapes.map((shape, idx) => ({
+        ...shape,
+        name: parsed.shapes.length === 1 ? label : `${label} ${idx + 1}`,
+        sourceD: null,
+        geometryDirty: true,
+        points: shape.points.map((pt) => ({
+          ...pt,
+          p: { x: pt.p.x + dx, y: pt.p.y + dy },
+          in: pt.in ? { x: pt.in.x + dx, y: pt.in.y + dy } : null,
+          out: pt.out ? { x: pt.out.x + dx, y: pt.out.y + dy } : null,
+        })),
+      }));
+      const next = [...base, ...created];
+      const inserted = created.map((_, idx) => startIndex + idx);
+      const all = next[startIndex]?.points.map((_, i) => i) ?? [0];
+      setPathSelected(true);
+      setSelectedPath(startIndex);
+      setSelectedPaths(inserted);
+      setSelectedPoint(all[0] ?? 0);
+      setSelectedPoints(all.length ? all : [0]);
+      return next;
+    });
+    setTool('select');
+    setPenHover(null);
+    setLucideMenu(null);
     enterTransformMode();
   };
 
@@ -978,6 +1048,7 @@ const App = () => {
     if (!path) return;
     setPathMetaMenu(createPathMetaMenuState(pathIndex, path, rect, { width: window.innerWidth, height: window.innerHeight }));
     setShapeMenu(null);
+    setLucideMenu(null);
     setStyleMenu(null);
   };
 
@@ -997,6 +1068,7 @@ const App = () => {
   const openStyleMenu = (kind: StylePanel, rect: DOMRect) => {
     setStyleMenu(createStyleMenuState(kind, rect, { width: window.innerWidth, height: window.innerHeight }));
     setShapeMenu(null);
+    setLucideMenu(null);
     setPathMetaMenu(null);
     setCurrentColorMenu(null);
   };
@@ -1004,8 +1076,17 @@ const App = () => {
   const openCurrentColorMenu = (rect: DOMRect) => {
     setCurrentColorMenu(createCurrentColorMenuState(rect, { width: window.innerWidth, height: window.innerHeight }));
     setShapeMenu(null);
+    setLucideMenu(null);
     setStyleMenu(null);
     setPathMetaMenu(null);
+  };
+
+  const openLucideMenu = (rect: DOMRect) => {
+    setLucideMenu(createLucideMenuState(rect, { width: window.innerWidth, height: window.innerHeight }));
+    setShapeMenu(null);
+    setStyleMenu(null);
+    setPathMetaMenu(null);
+    setCurrentColorMenu(null);
   };
 
   useEffect(() => {
@@ -1022,27 +1103,42 @@ const App = () => {
   }, [aboutOpen]);
 
   useEffect(() => {
-    if (!pathMetaMenu && !shapeMenu && !styleMenu && !currentColorMenu) return;
+    if (!pathMetaMenu && !shapeMenu && !lucideMenu && !styleMenu && !currentColorMenu) return;
     const onWindowPointerDown = (e: PointerEvent) => {
       const target = e.target as Node | null;
       if (!target) return;
       const inPathMeta = !!pathMetaMenuRef.current?.contains(target);
       const inShapeMenu = !!shapeMenuRef.current?.contains(target);
+      const inLucideMenu = !!lucideMenuRef.current?.contains(target);
       const inStyleMenu = !!styleMenuRef.current?.contains(target);
       const inCurrentColorMenu = !!currentColorMenuRef.current?.contains(target);
       const inShapeTrigger = !!shapeTriggerRef.current?.contains(target);
+      const inLucideTrigger = !!lucideTriggerRef.current?.contains(target);
       const inStyleTrigger = styleTriggerRefs.current.some((el) => !!el?.contains(target));
       const inCurrentColorTrigger = !!currentColorTriggerRef.current?.contains(target);
-      if (inPathMeta || inShapeMenu || inStyleMenu || inCurrentColorMenu || inShapeTrigger || inStyleTrigger || inCurrentColorTrigger) return;
+      if (
+        inPathMeta ||
+        inShapeMenu ||
+        inLucideMenu ||
+        inStyleMenu ||
+        inCurrentColorMenu ||
+        inShapeTrigger ||
+        inLucideTrigger ||
+        inStyleTrigger ||
+        inCurrentColorTrigger
+      ) {
+        return;
+      }
       setPathMetaMenu(null);
       setShapeMenu(null);
+      setLucideMenu(null);
       setStyleMenu(null);
       setCurrentColorMenu(null);
       setConfirmDeletePath(false);
     };
     window.addEventListener('pointerdown', onWindowPointerDown, true);
     return () => window.removeEventListener('pointerdown', onWindowPointerDown, true);
-  }, [pathMetaMenu, shapeMenu, styleMenu, currentColorMenu]);
+  }, [pathMetaMenu, shapeMenu, lucideMenu, styleMenu, currentColorMenu]);
 
   return (
     <div
@@ -1051,6 +1147,7 @@ const App = () => {
       onPointerDown={() => {
         setPathMetaMenu(null);
         setShapeMenu(null);
+        setLucideMenu(null);
         setStyleMenu(null);
         setCurrentColorMenu(null);
         setConfirmDeletePath(false);
@@ -1084,12 +1181,15 @@ const App = () => {
             setPenHover(null);
           }}
           shapeTriggerRef={shapeTriggerRef}
+          lucideTriggerRef={lucideTriggerRef}
           onOpenShapeMenu={(rect) => {
             setShapeMenu(createShapeMenuState(rect, { width: window.innerWidth, height: window.innerHeight }));
+            setLucideMenu(null);
             setStyleMenu(null);
             setPathMetaMenu(null);
             setCurrentColorMenu(null);
           }}
+          onOpenLucideMenu={openLucideMenu}
           onToggleStyleMenu={(kind, rect) => {
             if (styleMenu?.kind === kind) setStyleMenu(null);
             else openStyleMenu(kind, rect);
@@ -1283,6 +1383,7 @@ const App = () => {
         onClassValueChange={(next) => setPathMetaMenu((m) => (m ? { ...m, classValue: next } : m))}
       />
       <ShapeMenu menu={shapeMenu} menuRef={shapeMenuRef} onAddPreset={addPresetPath} />
+      <LucideIconMenu menu={lucideMenu} menuRef={lucideMenuRef} onClose={() => setLucideMenu(null)} onSelectIcon={addLucideIcon} />
       <StyleMenu
         menu={styleMenu}
         menuRef={styleMenuRef}

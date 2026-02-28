@@ -70,28 +70,30 @@ const TopBar = ({ onOpenAbout, onSaveSvg, onCopySvg, onClearSvg, copied }: Props
         <button className="control-btn text-sm" type="button" onClick={onCopySvg} title={copied ? 'Copied' : 'Copy SVG code'}>
           {copied ? 'Copied' : 'Copy SVG'}
         </button>
-        {!confirmClear ? (
-          <button className="control-btn text-sm confirm-text" type="button" onClick={() => setConfirmClear(true)} title="Clear document">
-            Clear
-          </button>
-        ) : (
-          <div className="topbar-inline-confirm" role="group" aria-label="Confirm clear">
-            <button
-              className="icon-btn confirm-text"
-              type="button"
-              onClick={() => {
-                onClearSvg();
-                setConfirmClear(false);
-              }}
-              title="Confirm clear"
-            >
-              <Check />
+        <div className="topbar-confirm-slot">
+          {!confirmClear ? (
+            <button className="control-btn text-sm confirm-text" type="button" onClick={() => setConfirmClear(true)} title="Clear document">
+              Clear
             </button>
-            <button className="icon-btn confirm-no" type="button" onClick={() => setConfirmClear(false)} title="Cancel clear">
-              <X />
-            </button>
-          </div>
-        )}
+          ) : (
+            <div className="topbar-inline-confirm" role="group" aria-label="Confirm clear">
+              <button
+                className="icon-btn confirm-text"
+                type="button"
+                onClick={() => {
+                  onClearSvg();
+                  setConfirmClear(false);
+                }}
+                title="Confirm clear"
+              >
+                <Check />
+              </button>
+              <button className="icon-btn confirm-no" type="button" onClick={() => setConfirmClear(false)} title="Cancel clear">
+                <X />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       {saveMenu ? (
         <form

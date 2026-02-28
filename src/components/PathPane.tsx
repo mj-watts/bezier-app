@@ -36,7 +36,6 @@ const PathPane = ({
   return (
     <aside className="paths-pane">
       <div className="paths-pane-header">
-        <h2>Paths</h2>
         <div className="paths-pane-actions">
           {!confirmDeletePath ? (
             <button
