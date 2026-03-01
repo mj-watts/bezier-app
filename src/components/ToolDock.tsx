@@ -1,9 +1,20 @@
-import { Expand, Library, Merge, MousePointer2, PaintBucket, PenLine, PenTool, Shapes, SquareDashed, WandSparkles } from 'lucide-react';
-import Tooltip from '@mui/material/Tooltip';
-import { type RefObject } from 'react';
+import {
+  BadgeInfo,
+  Expand,
+  Merge,
+  MousePointer2,
+  PaintBucket,
+  PenLine,
+  PenTool,
+  Shapes,
+  SquareDashed,
+  WandSparkles,
+} from "lucide-react";
+import Tooltip from "@mui/material/Tooltip";
+import { type RefObject } from "react";
 
-type Tool = 'select' | 'pen' | 'scale';
-type StylePanel = 'fill' | 'stroke' | 'opacity';
+type Tool = "select" | "pen" | "scale";
+type StylePanel = "fill" | "stroke" | "opacity";
 
 type Props = {
   tool: Tool;
@@ -42,22 +53,55 @@ const ToolDock = ({
 }: Props) => {
   return (
     <aside className="tool-dock">
-      <Tooltip title="Select Tool (V)" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
-        <button className={tool === 'select' ? 'tool active' : 'tool'} onClick={onSelectTool}>
+      <Tooltip
+        title="Select Tool (V)"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
+        <button
+          className={tool === "select" ? "tool active" : "tool"}
+          onClick={onSelectTool}
+        >
           <MousePointer2 />
         </button>
       </Tooltip>
-      <Tooltip title="Pen Tool (P)" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
-        <button className={tool === 'pen' ? 'tool active' : 'tool'} onClick={onPenTool}>
+      <Tooltip
+        title="Pen Tool (P)"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
+        <button
+          className={tool === "pen" ? "tool active" : "tool"}
+          onClick={onPenTool}
+        >
           <PenTool />
         </button>
       </Tooltip>
-      <Tooltip title="Transform Tool (T)" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
-        <button className={tool === 'scale' ? 'tool active' : 'tool'} onClick={onScaleTool}>
+      <Tooltip
+        title="Transform Tool (T)"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
+        <button
+          className={tool === "scale" ? "tool active" : "tool"}
+          onClick={onScaleTool}
+        >
           <Expand />
         </button>
       </Tooltip>
-      <Tooltip title="Add Preset Shape" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
+      <Tooltip
+        title="Add Preset Shape"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
         <button
           ref={shapeTriggerRef}
           className="tool"
@@ -70,7 +114,13 @@ const ToolDock = ({
           <Shapes />
         </button>
       </Tooltip>
-      <Tooltip title="Add Lucide Icon" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
+      <Tooltip
+        title="Add Lucide Icon"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
         <button
           ref={lucideTriggerRef}
           className="tool"
@@ -80,44 +130,68 @@ const ToolDock = ({
             onOpenLucideMenu(e.currentTarget.getBoundingClientRect());
           }}
         >
-          <Library />
+          <BadgeInfo />
         </button>
       </Tooltip>
       <div className="tool-divider" />
-      <Tooltip title="Fill" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
+      <Tooltip
+        title="Fill"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
         <button
           ref={(el) => setStyleTriggerRef(0, el)}
-          className={styleMenuKind === 'fill' ? 'tool active' : 'tool'}
+          className={styleMenuKind === "fill" ? "tool active" : "tool"}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
-            onToggleStyleMenu('fill', e.currentTarget.getBoundingClientRect());
+            onToggleStyleMenu("fill", e.currentTarget.getBoundingClientRect());
           }}
         >
           <PaintBucket />
         </button>
       </Tooltip>
-      <Tooltip title="Stroke" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
+      <Tooltip
+        title="Stroke"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
         <button
           ref={(el) => setStyleTriggerRef(1, el)}
-          className={styleMenuKind === 'stroke' ? 'tool active' : 'tool'}
+          className={styleMenuKind === "stroke" ? "tool active" : "tool"}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
-            onToggleStyleMenu('stroke', e.currentTarget.getBoundingClientRect());
+            onToggleStyleMenu(
+              "stroke",
+              e.currentTarget.getBoundingClientRect(),
+            );
           }}
         >
           <PenLine />
         </button>
       </Tooltip>
-      <Tooltip title="Opacity" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
+      <Tooltip
+        title="Opacity"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
         <button
           ref={(el) => setStyleTriggerRef(2, el)}
-          className={styleMenuKind === 'opacity' ? 'tool active' : 'tool'}
+          className={styleMenuKind === "opacity" ? "tool active" : "tool"}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
-            onToggleStyleMenu('opacity', e.currentTarget.getBoundingClientRect());
+            onToggleStyleMenu(
+              "opacity",
+              e.currentTarget.getBoundingClientRect(),
+            );
           }}
         >
           <SquareDashed />
@@ -125,7 +199,7 @@ const ToolDock = ({
       </Tooltip>
       <div className="tool-divider" />
       <Tooltip
-        title={pathSelected ? 'Smooth Path' : 'Smooth SVG'}
+        title={pathSelected ? "Smooth Path" : "Smooth SVG"}
         placement="right"
         enterDelay={0}
         enterNextDelay={0}
@@ -135,7 +209,13 @@ const ToolDock = ({
           <WandSparkles />
         </button>
       </Tooltip>
-      <Tooltip title="Merge Points" placement="right" enterDelay={0} enterNextDelay={0} leaveDelay={0}>
+      <Tooltip
+        title="Merge Points"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
         <span>
           <button className="tool" onClick={onMerge} disabled={!canMerge}>
             <Merge />

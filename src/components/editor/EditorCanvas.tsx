@@ -56,6 +56,7 @@ type Props = {
   transformTargetIndices: number[];
   isInsideTransformFrame: (pos: Vec) => boolean;
   isOverSelectedStroke: (pos: Vec) => boolean;
+  isOverSelectedFill: (pos: Vec) => boolean;
   startMoveDrag: (startPos: Vec, pointerId: number, target: SVGGeometryElement) => void;
   drag: DragTarget;
 };
@@ -101,6 +102,7 @@ const EditorCanvas = ({
   transformTargetIndices,
   isInsideTransformFrame,
   isOverSelectedStroke,
+  isOverSelectedFill,
   startMoveDrag,
   drag,
 }: Props) => {
@@ -303,6 +305,7 @@ const EditorCanvas = ({
               toLocal={toLocal}
               isInsideTransformFrame={isInsideTransformFrame}
               isOverSelectedStroke={isOverSelectedStroke}
+              isOverSelectedFill={isOverSelectedFill}
               clearSelection={clearSelection}
               startMoveDrag={startMoveDrag}
               pushUndo={pushUndo}

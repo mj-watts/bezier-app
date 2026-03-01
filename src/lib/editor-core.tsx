@@ -292,16 +292,36 @@ const createCirclePoints = (cx: number, cy: number, radius: number) => {
   ] satisfies Point[];
 };
 
+const createRectPoints = (x: number, y: number, w: number, h: number) => {
+  const parsed = parseRectPoints(`<rect x="${x}" y="${y}" width="${w}" height="${h}" />`);
+  if (parsed) return parsed;
+  return [
+    { id: uid(), p: { x, y }, in: null, out: null },
+    { id: uid(), p: { x: x + w, y }, in: null, out: null },
+    { id: uid(), p: { x: x + w, y: y + h }, in: null, out: null },
+    { id: uid(), p: { x, y: y + h }, in: null, out: null },
+  ] satisfies Point[];
+};
+
 const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: number): PathShape => {
   const radius = 90;
+  const side = radius * 2;
+  const rectX = cx - radius;
+  const rectY = cy - radius;
   const points =
     preset === 'circle'
       ? createCirclePoints(cx, cy, radius)
       : preset === 'roundedSquare'
-        ? createCurvedPolygonPoints(cx, cy, radius, 4, -Math.PI / 4, 0.14)
+        ? createRectPoints(rectX, rectY, side, side)
         : preset === 'roundedDiamond'
           ? createCurvedPolygonPoints(cx, cy, radius, 4, 0, 0.12)
           : createCurvedPolygonPoints(cx, cy, radius, 3, -Math.PI / 2, 0.16);
+  const sourceD =
+    preset === 'circle'
+      ? `<circle cx="${cx}" cy="${cy}" r="${radius}" />`
+      : preset === 'roundedSquare'
+        ? `<rect x="${rectX}" y="${rectY}" width="${side}" height="${side}" />`
+        : null;
 
   return {
     id: uid(),
@@ -310,8 +330,8 @@ const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: num
     uiRotation: 0,
     svgId: '',
     svgClass: '',
-    sourceD: null,
-    geometryDirty: true,
+    sourceD,
+    geometryDirty: sourceD ? false : true,
     fill: 'currentColor',
     stroke: 'currentColor',
     strokeWidth: 3,
@@ -549,17 +569,33 @@ const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
     .map((shape, i) => {
       const exportShape = exportShapes[i];
       if (!exportShape) return '';
-      const d = !shape.geometryDirty && shape.sourceD ? shape.sourceD : pathData(exportShape.points, exportShape.closed);
-      const attrs: string[] = [`d="${d}"`];
-      if (shape.svgId.trim()) attrs.push(`id="${esc(shape.svgId.trim())}"`);
-      if (shape.svgClass.trim()) attrs.push(`class="${esc(shape.svgClass.trim())}"`);
-      if (shape.fillExplicit) attrs.push(`fill="${shape.fill}"`);
-      if (shape.opacityExplicit) attrs.push(`opacity="${Number(shape.opacity.toFixed(4))}"`);
+      const commonAttrs: string[] = [];
+      if (shape.svgId.trim()) commonAttrs.push(`id="${esc(shape.svgId.trim())}"`);
+      if (shape.svgClass.trim()) commonAttrs.push(`class="${esc(shape.svgClass.trim())}"`);
+      if (shape.fillExplicit) commonAttrs.push(`fill="${shape.fill}"`);
+      if (shape.opacityExplicit) commonAttrs.push(`opacity="${Number(shape.opacity.toFixed(4))}"`);
       const shouldExportStroke = exportShape.strokeWidth > 0;
-      if (shouldExportStroke && shape.strokeExplicit) attrs.push(`stroke="${shape.stroke}"`);
-      if (shouldExportStroke && shape.strokeWidthExplicit) attrs.push(`stroke-width="${Number(exportShape.strokeWidth.toFixed(4))}"`);
-      if (shouldExportStroke && shape.strokeLinecapExplicit) attrs.push(`stroke-linecap="${shape.strokeLinecap}"`);
-      if (shouldExportStroke && shape.strokeLinejoinExplicit) attrs.push(`stroke-linejoin="${shape.strokeLinejoin}"`);
+      if (shouldExportStroke && shape.strokeExplicit) commonAttrs.push(`stroke="${shape.stroke}"`);
+      if (shouldExportStroke && shape.strokeWidthExplicit) commonAttrs.push(`stroke-width="${Number(exportShape.strokeWidth.toFixed(4))}"`);
+      if (shouldExportStroke && shape.strokeLinecapExplicit) commonAttrs.push(`stroke-linecap="${shape.strokeLinecap}"`);
+      if (shouldExportStroke && shape.strokeLinejoinExplicit) commonAttrs.push(`stroke-linejoin="${shape.strokeLinejoin}"`);
+
+      if (!shape.geometryDirty && shape.sourceD?.startsWith('<circle')) {
+        const b = getPathBounds(exportShape.points);
+        if (b) {
+          const r = Math.max(0, Math.min(b.maxX - b.minX, b.maxY - b.minY) / 2);
+          return `  <circle cx="${Number(b.cx.toFixed(4))}" cy="${Number(b.cy.toFixed(4))}" r="${Number(r.toFixed(4))}" ${commonAttrs.join(' ')} />`;
+        }
+      }
+      if (!shape.geometryDirty && shape.sourceD?.startsWith('<rect')) {
+        const b = getPathBounds(exportShape.points);
+        if (b) {
+          return `  <rect x="${Number(b.minX.toFixed(4))}" y="${Number(b.minY.toFixed(4))}" width="${Number((b.maxX - b.minX).toFixed(4))}" height="${Number((b.maxY - b.minY).toFixed(4))}" ${commonAttrs.join(' ')} />`;
+        }
+      }
+
+      const d = !shape.geometryDirty && shape.sourceD && !shape.sourceD.startsWith('<') ? shape.sourceD : pathData(exportShape.points, exportShape.closed);
+      const attrs: string[] = [`d="${d}"`, ...commonAttrs];
       return `  <path ${attrs.join(' ')} />`;
     })
     .filter(Boolean)

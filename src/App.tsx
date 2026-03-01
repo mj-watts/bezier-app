@@ -58,6 +58,7 @@ import {
   rgbaToCss,
   rgbaToHexAlpha,
   rotateAround,
+  sampleBezier,
   serializeSvg,
   simplifyPathByThreshold,
   smoothSharpCorners,
@@ -132,7 +133,7 @@ const App = () => {
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
   const currentColorMenuRef = useRef<HTMLDivElement | null>(null);
 
-  const activePath = shapes[selectedPath];
+  const activePath = shapes[selectedPath] ?? DEFAULT_DOCUMENT.shapes[0];
   const transformTargetIndices = useMemo(() => {
     if (transformAllPaths) return shapes.map((_, i) => i);
     if (selectedPaths.length > 1) return [...selectedPaths].sort((a, b) => a - b);
@@ -301,22 +302,8 @@ const App = () => {
       }
       if (key === 'delete' || key === 'backspace') {
         e.preventDefault();
-        if (!pathSelected || shapes.length <= 1) return;
-        pushUndo();
-        const targets = new Set(selectedPaths.length ? selectedPaths : [selectedPath]);
-        setShapes((curr) => {
-          if (curr.length <= 1) return curr;
-          const next = curr.filter((_, i) => !targets.has(i));
-          if (!next.length) return curr;
-          const nextSel = clamp(selectedPath - 1, 0, next.length - 1);
-          const all = next[nextSel]?.points.map((_, i) => i) ?? [0];
-          setSelectedPath(nextSel);
-          setSelectedPaths([nextSel]);
-          setPathSelected(true);
-          setSelectedPoint(all[0] ?? 0);
-          setSelectedPoints(all.length ? all : [0]);
-          return next;
-        });
+        deletePath();
+        setConfirmDeletePath(false);
       }
     };
 
@@ -511,14 +498,23 @@ const App = () => {
   };
 
   const deletePath = () => {
-    if (!pathSelected || shapes.length <= 1) return;
+    if (!pathSelected || shapes.length === 0) return;
     pushUndo();
     const targets = new Set(selectedPaths.length ? selectedPaths : [selectedPath]);
     setShapes((curr) => {
-      if (curr.length <= 1) return curr;
       const next = curr.filter((_, i) => !targets.has(i));
-      if (!next.length) return curr;
-      const nextSel = clamp(selectedPath - 1, 0, next.length - 1);
+      if (!next.length) {
+        setSelectedPath(0);
+        setSelectedPaths([]);
+        setPathSelected(false);
+        setSelectedPoint(0);
+        setSelectedPoints([]);
+        setTransformAllPaths(false);
+        setPenHover(null);
+        return next;
+      }
+      const nextSelBase = targets.has(selectedPath) ? selectedPath - 1 : selectedPath;
+      const nextSel = clamp(nextSelBase, 0, next.length - 1);
       const all = next[nextSel]?.points.map((_, i) => i) ?? [0];
       setSelectedPath(nextSel);
       setSelectedPaths([nextSel]);
@@ -655,6 +651,7 @@ const App = () => {
         nextCursor = 'move';
       } else if (tool === 'select' && pathSelected) {
         const overPivot = !!transformFrame && dist(pos, { x: transformFrame.cx, y: transformFrame.cy }) <= 8 / zoom;
+        const overFill = isOverSelectedFill(pos);
         const overStroke = transformTargetIndices.some((idx) => {
           const shape = shapes[idx];
           if (!shape) return false;
@@ -674,7 +671,7 @@ const App = () => {
             unrot.y <= transformFrame.maxY + eps
           );
         })();
-        if (overPivot || (insideTransform && overStroke)) nextCursor = 'move';
+        if (overPivot || (insideTransform && (overStroke || overFill))) nextCursor = 'move';
         else nextCursor = 'default';
       }
       e.currentTarget.style.cursor = nextCursor;
@@ -920,7 +917,7 @@ const App = () => {
     pathSelected && selectedPaths.length
       ? selectedPaths.every((i) => (shapes[i]?.strokeWidth ?? 0) <= 0)
       : activePath.strokeWidth <= 0;
-  const canDeletePath = pathSelected && shapes.length > 1;
+  const canDeletePath = pathSelected && shapes.length > 0;
 
   const allPointIndicesForPath = (pathIndex: number) => {
     const all = shapes[pathIndex]?.points.map((_, i) => i) ?? [];
@@ -961,6 +958,64 @@ const App = () => {
       const strokeW = shape.strokeWidthExplicit ? Math.max(0, shape.strokeWidth) : 0;
       const threshold = Math.max(baseThreshold, strokeW / 2 + 2 / zoom);
       return seg.distance <= threshold;
+    });
+  };
+
+  const shapeHasVisibleFill = (shape: PathShape) => {
+    if (shape.opacityExplicit && shape.opacity <= 0) return false;
+    const fillValue = shape.fillExplicit ? shape.fill : 'currentColor';
+    const fillLower = fillValue.trim().toLowerCase();
+    if (!fillLower || fillLower === 'none' || fillLower === 'transparent') return false;
+    const parsed = parseColorToRgba(fillValue, { r: 0, g: 0, b: 0, a: 1 });
+    return parsed.a > 0.001;
+  };
+
+  const isPointInPolygon = (p: Vec, vertices: Vec[]) => {
+    let inside = false;
+    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i, i += 1) {
+      const xi = vertices[i].x;
+      const yi = vertices[i].y;
+      const xj = vertices[j].x;
+      const yj = vertices[j].y;
+      const intersects = yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi + Number.EPSILON) + xi;
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  };
+
+  const isOverSelectedFill = (pos: Vec) => {
+    if (!pathSelected) return false;
+    return transformTargetIndices.some((idx) => {
+      const shape = shapes[idx];
+      if (!shape || !shapeHasVisibleFill(shape)) return false;
+      if (shape.points.length < 3) return false;
+      const bounds = getPathBounds(shape.points);
+      if (!bounds) return false;
+      if (pos.x < bounds.minX || pos.x > bounds.maxX || pos.y < bounds.minY || pos.y > bounds.maxY) return false;
+
+      const segmentCount = shape.closed ? shape.points.length : shape.points.length - 1;
+      if (segmentCount < 2) return false;
+
+      const polygon: Vec[] = [];
+      for (let seg = 0; seg < segmentCount; seg += 1) {
+        const a = shape.points[seg];
+        const b = shape.points[(seg + 1) % shape.points.length];
+        if (!a || !b) continue;
+        if (seg === 0) polygon.push(a.p);
+        const c1 = a.out ?? a.p;
+        const c2 = b.in ?? b.p;
+        if (a.out || b.in) {
+          for (let s = 1; s <= 12; s += 1) {
+            polygon.push(sampleBezier(a.p, c1, c2, b.p, s / 12));
+          }
+        } else {
+          polygon.push(b.p);
+        }
+      }
+
+      if (!shape.closed) polygon.push(shape.points[0].p);
+      if (polygon.length < 3) return false;
+      return isPointInPolygon(pos, polygon);
     });
   };
 
@@ -1297,6 +1352,7 @@ const App = () => {
             transformTargetIndices={transformTargetIndices}
             isInsideTransformFrame={isInsideTransformFrame}
             isOverSelectedStroke={isOverSelectedStroke}
+            isOverSelectedFill={isOverSelectedFill}
             startMoveDrag={startMoveDrag}
             drag={drag}
           />

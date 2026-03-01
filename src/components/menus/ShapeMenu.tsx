@@ -22,7 +22,7 @@ const ShapeMenu = ({ menu, menuRef, onAddPreset }: Props) => {
       <button className="shape-preset-btn" title="Circle" onClick={() => onAddPreset('circle')}>
         <Circle />
       </button>
-      <button className="shape-preset-btn" title="Curved Square" onClick={() => onAddPreset('roundedSquare')}>
+      <button className="shape-preset-btn" title="Square" onClick={() => onAddPreset('roundedSquare')}>
         <Square />
       </button>
       <button className="shape-preset-btn" title="Curved Diamond" onClick={() => onAddPreset('roundedDiamond')}>

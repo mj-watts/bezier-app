@@ -11,6 +11,7 @@ type Props = {
   toLocal: (clientX: number, clientY: number, target: SVGSVGElement) => Vec;
   isInsideTransformFrame: (pos: Vec) => boolean;
   isOverSelectedStroke: (pos: Vec) => boolean;
+  isOverSelectedFill: (pos: Vec) => boolean;
   clearSelection: () => void;
   startMoveDrag: (startPos: Vec, pointerId: number, target: SVGGeometryElement) => void;
   pushUndo: () => void;
@@ -32,6 +33,7 @@ const TransformOverlay = ({
   toLocal,
   isInsideTransformFrame,
   isOverSelectedStroke,
+  isOverSelectedFill,
   clearSelection,
   startMoveDrag,
   pushUndo,
@@ -85,7 +87,7 @@ const TransformOverlay = ({
                     if (!svg) return;
                     const startPos = toLocal(e.clientX, e.clientY, svg);
                     if (tool === 'select') {
-                      if (!isInsideTransformFrame(startPos) || !isOverSelectedStroke(startPos)) {
+                      if (!isInsideTransformFrame(startPos) || (!isOverSelectedStroke(startPos) && !isOverSelectedFill(startPos))) {
                         clearSelection();
                         return;
                       }
