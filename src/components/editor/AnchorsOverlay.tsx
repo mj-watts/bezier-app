@@ -8,7 +8,7 @@ type Props = {
   tool: Tool;
   selectedPoints: number[];
   selectedPoint: number;
-  zoom: number;
+  worldUnitsPerPx: number;
   penHover: PenHover;
   spaceDown: boolean;
   pushUndo: () => void;
@@ -26,7 +26,7 @@ const AnchorsOverlay = ({
   tool,
   selectedPoints,
   selectedPoint,
-  zoom,
+  worldUnitsPerPx,
   penHover,
   spaceDown,
   pushUndo,
@@ -36,6 +36,11 @@ const AnchorsOverlay = ({
   setDrag,
   selectedPath,
 }: Props) => {
+  const maxPointDiameterPx = 6;
+  const handleDiameterPx = Math.min(4, maxPointDiameterPx);
+  const handleRadius = (handleDiameterPx / 2) * worldUnitsPerPx;
+  const anchorDiameterFor = (isPrimary: boolean) => Math.min(isPrimary ? 5 : 4, maxPointDiameterPx) * worldUnitsPerPx;
+
   return (
     <>
             {pathSelected &&
@@ -55,7 +60,7 @@ const AnchorsOverlay = ({
                     <circle
                       cx={pt.in.x}
                       cy={pt.in.y}
-                      r={2 / zoom}
+                      r={handleRadius}
                       className="handle in"
                       onPointerDown={(e) => {
                         if (tool !== 'select' || spaceDown) return;
@@ -86,7 +91,7 @@ const AnchorsOverlay = ({
                     <circle
                       cx={pt.out.x}
                       cy={pt.out.y}
-                      r={2 / zoom}
+                      r={handleRadius}
                       className="handle out"
                       onPointerDown={(e) => {
                         if (tool !== 'select' || spaceDown) return;
@@ -105,10 +110,10 @@ const AnchorsOverlay = ({
                 )}
 
                 <rect
-                  x={pt.p.x - (selectedPoints.length === 1 && i === selectedPoint ? 2.5 : 2) / zoom}
-                  y={pt.p.y - (selectedPoints.length === 1 && i === selectedPoint ? 2.5 : 2) / zoom}
-                  width={(selectedPoints.length === 1 && i === selectedPoint ? 5 : 4) / zoom}
-                  height={(selectedPoints.length === 1 && i === selectedPoint ? 5 : 4) / zoom}
+                  x={pt.p.x - anchorDiameterFor(selectedPoints.length === 1 && i === selectedPoint) / 2}
+                  y={pt.p.y - anchorDiameterFor(selectedPoints.length === 1 && i === selectedPoint) / 2}
+                  width={anchorDiameterFor(selectedPoints.length === 1 && i === selectedPoint)}
+                  height={anchorDiameterFor(selectedPoints.length === 1 && i === selectedPoint)}
                   className={
                     penHover?.kind === 'anchor' && penHover.pointIndex === i
                       ? 'anchor pen-delete'
@@ -116,7 +121,8 @@ const AnchorsOverlay = ({
                         ? 'anchor selected'
                         : 'anchor'
                   }
-                  style={{ strokeWidth: (selectedPoints.length === 1 && i === selectedPoint ? 1.4 : 1.1) / zoom }}
+                  style={{ strokeWidth: selectedPoints.length === 1 && i === selectedPoint ? 1.4 : 1.1 }}
+                  vectorEffect="non-scaling-stroke"
                   onPointerDown={(e) => {
                     if (tool !== 'select' || spaceDown) return;
                     e.stopPropagation();

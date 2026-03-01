@@ -106,6 +106,12 @@ const EditorCanvas = ({
   startMoveDrag,
   drag,
 }: Props) => {
+  const svgElement = editorSvgRef.current;
+  const scaleX = svgElement ? svgElement.clientWidth / (width / zoom) : zoom;
+  const scaleY = svgElement ? svgElement.clientHeight / (height / zoom) : zoom;
+  const screenScale = Math.max(0.0001, Math.min(scaleX, scaleY));
+  const worldUnitsPerPx = 1 / screenScale;
+
   return (
     <>
           <svg
@@ -278,24 +284,6 @@ const EditorCanvas = ({
                 ))
               : null}
 
-            <AnchorsOverlay
-              pathSelected={pathSelected}
-              selectedPaths={selectedPaths}
-              activePath={activePath}
-              tool={tool}
-              selectedPoints={selectedPoints}
-              selectedPoint={selectedPoint}
-              zoom={zoom}
-              penHover={penHover}
-              spaceDown={spaceDown}
-              pushUndo={pushUndo}
-              toLocal={toLocal}
-              setSelectedPoint={setSelectedPoint}
-              setSelectedPoints={setSelectedPoints}
-              setDrag={setDrag}
-              selectedPath={selectedPath}
-            />
-
             <TransformOverlay
               pathSelected={pathSelected}
               tool={tool}
@@ -318,6 +306,24 @@ const EditorCanvas = ({
               drag={drag}
             />
 
+            <AnchorsOverlay
+              pathSelected={pathSelected}
+              selectedPaths={selectedPaths}
+              activePath={activePath}
+              tool={tool}
+              selectedPoints={selectedPoints}
+              selectedPoint={selectedPoint}
+              worldUnitsPerPx={worldUnitsPerPx}
+              penHover={penHover}
+              spaceDown={spaceDown}
+              pushUndo={pushUndo}
+              toLocal={toLocal}
+              setSelectedPoint={setSelectedPoint}
+              setSelectedPoints={setSelectedPoints}
+              setDrag={setDrag}
+              selectedPath={selectedPath}
+            />
+
             {tool === 'pen' && penHover?.kind === 'segment' ? (
               <rect
                 x={
@@ -328,7 +334,7 @@ const EditorCanvas = ({
                       activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].p,
                     activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].p,
                     0.5,
-                  ).x - 3 / zoom
+                  ).x - 3 * worldUnitsPerPx
                 }
                 y={
                   sampleBezier(
@@ -338,11 +344,12 @@ const EditorCanvas = ({
                       activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].p,
                     activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].p,
                     0.5,
-                  ).y - 3 / zoom
+                  ).y - 3 * worldUnitsPerPx
                 }
-                width={6 / zoom}
-                height={6 / zoom}
+                width={6 * worldUnitsPerPx}
+                height={6 * worldUnitsPerPx}
                 className="pen-add"
+                vectorEffect="non-scaling-stroke"
               />
             ) : null}
 
@@ -367,7 +374,7 @@ const EditorCanvas = ({
               ? 'Pen tool: hover anchor to delete point, hover segment to add point, then click. Hold Space to pan.'
               : tool === 'scale'
                 ? 'Scale tool: drag inside box to move, drag corners to scale. Shift = uniform, Alt/Option = center scale. Hold Space to pan.'
-                : 'Select tool: drag anchors/handles to edit curvature. Transform box stays visible for selected paths. Hold Space to pan.'}
+                : 'Select tool: hover over a point, then drag to move it. Drag handles to edit curvature. Transform box stays visible for selected paths. Hold Space to pan.'}
           </p>
     </>
   );

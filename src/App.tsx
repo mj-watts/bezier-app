@@ -635,6 +635,10 @@ const App = () => {
   const onCanvasMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const pos = toLocal(e.clientX, e.clientY, e.currentTarget);
     const rect = e.currentTarget.getBoundingClientRect();
+    const scaleX = rect.width / (width / zoom);
+    const scaleY = rect.height / (height / zoom);
+    const screenScale = Math.max(0.0001, Math.min(scaleX, scaleY));
+    const worldUnitsPerPx = 1 / screenScale;
     const nx = clamp((e.clientX - rect.left) / rect.width, 0, 1);
     const ny = clamp((e.clientY - rect.top) / rect.height, 0, 1);
     setCursorZoomFocus({ nx, ny });
@@ -650,6 +654,15 @@ const App = () => {
       } else if (tool === 'scale') {
         nextCursor = 'move';
       } else if (tool === 'select' && pathSelected) {
+        const selectedAnchorHit = 4 * worldUnitsPerPx;
+        const activeSelectedPoint = activePath?.points[selectedPoint];
+        const overAnchorPoint =
+          selectedPaths.length === 1 && !!activePath && activePath.points.some((pt) => dist(pt.p, pos) <= selectedAnchorHit);
+        const overBezierHandle =
+          selectedPaths.length === 1 &&
+          !!activeSelectedPoint &&
+          ((activeSelectedPoint.in && dist(activeSelectedPoint.in, pos) <= selectedAnchorHit) ||
+            (activeSelectedPoint.out && dist(activeSelectedPoint.out, pos) <= selectedAnchorHit));
         const overPivot = !!transformFrame && dist(pos, { x: transformFrame.cx, y: transformFrame.cy }) <= 8 / zoom;
         const overFill = isOverSelectedFill(pos);
         const overStroke = transformTargetIndices.some((idx) => {
@@ -671,7 +684,8 @@ const App = () => {
             unrot.y <= transformFrame.maxY + eps
           );
         })();
-        if (overPivot || (insideTransform && (overStroke || overFill))) nextCursor = 'move';
+        if (overAnchorPoint || overBezierHandle) nextCursor = 'default';
+        else if (overPivot || (insideTransform && (overStroke || overFill))) nextCursor = 'move';
         else nextCursor = 'default';
       }
       e.currentTarget.style.cursor = nextCursor;

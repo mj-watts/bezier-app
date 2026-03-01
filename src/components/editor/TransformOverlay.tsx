@@ -62,11 +62,12 @@ const TransformOverlay = ({
                   const bottomMid = rot({ x: b.cx, y: b.maxY });
                   const leftMid = rot({ x: b.minX, y: b.cy });
                   const sizeLabel = `${(b.maxX - b.minX).toFixed(1)} x ${(b.maxY - b.minY).toFixed(1)}`;
-                  const labelFontSize = 9 / zoom;
-                  const labelWidth = (sizeLabel.length * 5.5 + 8) / zoom;
-                  const labelHeight = 14 / zoom;
+                  const sizeTagScale = 0.6;
+                  const labelFontSize = (9 * sizeTagScale) / zoom;
+                  const labelWidth = ((sizeLabel.length * 5.5 + 8) * sizeTagScale) / zoom;
+                  const labelHeight = (14 * sizeTagScale) / zoom;
                   const down = { x: -Math.sin(b.angle), y: Math.cos(b.angle) };
-                  const labelOffset = 5 / zoom + labelHeight / 2;
+                  const labelOffset = (5 * sizeTagScale) / zoom + labelHeight / 2;
                   const labelCx = bottomMid.x + down.x * labelOffset;
                   const labelCy = bottomMid.y + down.y * labelOffset;
                   const rotArmEnd = rot({ x: b.cx, y: b.minY - 18 / zoom });
@@ -106,8 +107,8 @@ const TransformOverlay = ({
                     y={labelCy - labelHeight / 2}
                     width={labelWidth}
                     height={labelHeight}
-                    rx={3 / zoom}
-                    ry={3 / zoom}
+                    rx={(3 * sizeTagScale) / zoom}
+                    ry={(3 * sizeTagScale) / zoom}
                     className="scale-size-tag-box"
                   />
                   <text
