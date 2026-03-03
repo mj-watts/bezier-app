@@ -693,6 +693,126 @@ const mapPathDFromViewBox = (d: string, vb: ViewBox): string => {
   return out.join(' ');
 };
 
+const translatePathD = (d: string, tx: number, ty: number): string => {
+  const tokens = (d.match(/[AaCcHhLlMmQqSsTtVvZz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []).map((t) => t.trim());
+  if (!tokens.length) return d;
+  const fmt = (n: number) => Number(n.toFixed(4)).toString();
+
+  const out: string[] = [];
+  let i = 0;
+  let cmd = '';
+  let rel = false;
+  const isCmd = (t: string) => /^[AaCcHhLlMmQqSsTtVvZz]$/.test(t);
+  const isNum = (t: string) => /^-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?$/i.test(t);
+  const nextNum = () => {
+    if (i >= tokens.length || !isNum(tokens[i])) return null;
+    const n = Number(tokens[i]);
+    i += 1;
+    return Number.isFinite(n) ? n : null;
+  };
+  const x = (v: number) => (rel ? v : v + tx);
+  const y = (v: number) => (rel ? v : v + ty);
+
+  while (i < tokens.length) {
+    if (isCmd(tokens[i])) {
+      const raw = tokens[i];
+      cmd = raw.toUpperCase();
+      rel = raw !== cmd;
+      i += 1;
+      if (cmd === 'Z') out.push(raw);
+      continue;
+    }
+    if (!cmd) break;
+
+    if (cmd === 'M') {
+      const mx = nextNum();
+      const my = nextNum();
+      if (mx === null || my === null) break;
+      out.push(`${rel ? 'm' : 'M'} ${fmt(x(mx))} ${fmt(y(my))}`);
+      while (i < tokens.length && isNum(tokens[i])) {
+        const lx = nextNum();
+        const ly = nextNum();
+        if (lx === null || ly === null) break;
+        out.push(`${rel ? 'l' : 'L'} ${fmt(x(lx))} ${fmt(y(ly))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'L' || cmd === 'T') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const lx = nextNum();
+        const ly = nextNum();
+        if (lx === null || ly === null) break;
+        out.push(`${rel ? cmd.toLowerCase() : cmd} ${fmt(x(lx))} ${fmt(y(ly))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'H') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const hx = nextNum();
+        if (hx === null) break;
+        out.push(`${rel ? 'h' : 'H'} ${fmt(x(hx))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'V') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const vy = nextNum();
+        if (vy === null) break;
+        out.push(`${rel ? 'v' : 'V'} ${fmt(y(vy))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'C') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const x1 = nextNum();
+        const y1 = nextNum();
+        const x2 = nextNum();
+        const y2 = nextNum();
+        const ex = nextNum();
+        const ey = nextNum();
+        if (x1 === null || y1 === null || x2 === null || y2 === null || ex === null || ey === null) break;
+        out.push(`${rel ? 'c' : 'C'} ${fmt(x(x1))} ${fmt(y(y1))} ${fmt(x(x2))} ${fmt(y(y2))} ${fmt(x(ex))} ${fmt(y(ey))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'S' || cmd === 'Q') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const x1 = nextNum();
+        const y1 = nextNum();
+        const ex = nextNum();
+        const ey = nextNum();
+        if (x1 === null || y1 === null || ex === null || ey === null) break;
+        out.push(`${rel ? cmd.toLowerCase() : cmd} ${fmt(x(x1))} ${fmt(y(y1))} ${fmt(x(ex))} ${fmt(y(ey))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'A') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const rx = nextNum();
+        const ry = nextNum();
+        const angle = nextNum();
+        const large = nextNum();
+        const sweep = nextNum();
+        const ex = nextNum();
+        const ey = nextNum();
+        if (rx === null || ry === null || angle === null || large === null || sweep === null || ex === null || ey === null) break;
+        out.push(`${rel ? 'a' : 'A'} ${fmt(rx)} ${fmt(ry)} ${fmt(angle)} ${Math.round(large)} ${Math.round(sweep)} ${fmt(x(ex))} ${fmt(y(ey))}`);
+      }
+      continue;
+    }
+
+    break;
+  }
+
+  return out.join(' ');
+};
+
 const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const exportShapes = mapShapesToViewBox(shapes, vb);
@@ -1733,6 +1853,7 @@ export {
   highlightSelectedPathHtml,
   makePoint,
   mapPointFromViewBox,
+  translatePathD,
   mergePointPair,
   mirrorHandle,
   mapPathDFromViewBox,

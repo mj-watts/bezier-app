@@ -64,6 +64,7 @@ import {
   simplifyPathByThreshold,
   smoothSharpCorners,
   syntaxHighlightSvgHtml,
+  translatePathD,
   height,
   width,
 } from './lib/editor-core';
@@ -765,11 +766,14 @@ const App = () => {
       setShapes(() => {
         const dx = pos.x - drag.startPos.x;
         const dy = pos.y - drag.startPos.y;
+        const s = Math.min(width / docViewBox.vbW, height / docViewBox.vbH);
+        const dxVb = s === 0 ? 0 : dx / s;
+        const dyVb = s === 0 ? 0 : dy / s;
         const map = (v: Vec): Vec => ({ x: v.x + dx, y: v.y + dy });
 
         return drag.baseShapes.map((shape, i) => {
           if (!drag.targetPathIndices.includes(i)) return shape;
-          return markGeometryDirty({
+          const moved = {
             ...shape,
             points: shape.points.map((pt) => ({
               ...pt,
@@ -777,7 +781,14 @@ const App = () => {
               in: pt.in ? map(pt.in) : null,
               out: pt.out ? map(pt.out) : null,
             })),
-          });
+          };
+          if (!shape.geometryDirty && shape.sourceD && !shape.sourceD.startsWith('<')) {
+            return {
+              ...moved,
+              sourceD: translatePathD(shape.sourceD, dxVb, dyVb),
+            };
+          }
+          return markGeometryDirty(moved);
         });
       });
       return;
