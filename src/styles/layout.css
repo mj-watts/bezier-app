@@ -330,8 +330,8 @@ textarea {
   min-height: 0;
   min-width: 0;
   padding: 12px;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   background: var(--panel);
   border-left: 1px solid var(--edge);
@@ -358,10 +358,11 @@ textarea {
 
 .paths-list {
   min-height: 0;
+  flex: 1 1 auto;
   overflow: auto;
   overflow-x: hidden;
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   padding-right: 2px;
 }
@@ -370,6 +371,7 @@ textarea {
   width: 100%;
   max-width: 100%;
   min-width: 0;
+  min-height: 36px;
   display: block;
   justify-content: flex-start;
   text-align: left;

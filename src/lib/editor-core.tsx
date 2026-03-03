@@ -562,6 +562,137 @@ const mapShapesToViewBox = (shapes: PathShape[], vb: ViewBox) =>
     };
   });
 
+const mapPathDFromViewBox = (d: string, vb: ViewBox): string => {
+  const tokens = (d.match(/[AaCcHhLlMmQqSsTtVvZz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []).map((t) => t.trim());
+  if (!tokens.length) return d;
+  const { s, ox, oy } = getContainMap(vb);
+  const fmt = (n: number) => Number(n.toFixed(4)).toString();
+  const mapX = (x: number, rel: boolean) => (rel ? x * s : (x - vb.minX) * s + ox);
+  const mapY = (y: number, rel: boolean) => (rel ? y * s : (y - vb.minY) * s + oy);
+
+  const out: string[] = [];
+  let i = 0;
+  let cmd = '';
+  let rel = false;
+  const isCmd = (t: string) => /^[AaCcHhLlMmQqSsTtVvZz]$/.test(t);
+  const isNum = (t: string) => /^-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?$/i.test(t);
+  const nextNum = () => {
+    if (i >= tokens.length || !isNum(tokens[i])) return null;
+    const n = Number(tokens[i]);
+    i += 1;
+    return Number.isFinite(n) ? n : null;
+  };
+
+  while (i < tokens.length) {
+    if (isCmd(tokens[i])) {
+      const raw = tokens[i];
+      cmd = raw.toUpperCase();
+      rel = raw !== cmd;
+      i += 1;
+      if (cmd === 'Z') out.push(raw);
+      continue;
+    }
+    if (!cmd) break;
+
+    if (cmd === 'M') {
+      const x = nextNum();
+      const y = nextNum();
+      if (x === null || y === null) break;
+      out.push(`${rel ? 'm' : 'M'} ${fmt(mapX(x, rel))} ${fmt(mapY(y, rel))}`);
+      while (i < tokens.length && isNum(tokens[i])) {
+        const lx = nextNum();
+        const ly = nextNum();
+        if (lx === null || ly === null) break;
+        out.push(`${rel ? 'l' : 'L'} ${fmt(mapX(lx, rel))} ${fmt(mapY(ly, rel))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'L' || cmd === 'T') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const x = nextNum();
+        const y = nextNum();
+        if (x === null || y === null) break;
+        out.push(`${rel ? cmd.toLowerCase() : cmd} ${fmt(mapX(x, rel))} ${fmt(mapY(y, rel))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'H') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const x = nextNum();
+        if (x === null) break;
+        out.push(`${rel ? 'h' : 'H'} ${fmt(mapX(x, rel))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'V') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const y = nextNum();
+        if (y === null) break;
+        out.push(`${rel ? 'v' : 'V'} ${fmt(mapY(y, rel))}`);
+      }
+      continue;
+    }
+
+    if (cmd === 'C') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const x1 = nextNum();
+        const y1 = nextNum();
+        const x2 = nextNum();
+        const y2 = nextNum();
+        const x = nextNum();
+        const y = nextNum();
+        if (x1 === null || y1 === null || x2 === null || y2 === null || x === null || y === null) break;
+        out.push(
+          `${rel ? 'c' : 'C'} ${fmt(mapX(x1, rel))} ${fmt(mapY(y1, rel))} ${fmt(mapX(x2, rel))} ${fmt(mapY(y2, rel))} ${fmt(
+            mapX(x, rel),
+          )} ${fmt(mapY(y, rel))}`,
+        );
+      }
+      continue;
+    }
+
+    if (cmd === 'S' || cmd === 'Q') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const x1 = nextNum();
+        const y1 = nextNum();
+        const x = nextNum();
+        const y = nextNum();
+        if (x1 === null || y1 === null || x === null || y === null) break;
+        out.push(
+          `${rel ? cmd.toLowerCase() : cmd} ${fmt(mapX(x1, rel))} ${fmt(mapY(y1, rel))} ${fmt(mapX(x, rel))} ${fmt(mapY(y, rel))}`,
+        );
+      }
+      continue;
+    }
+
+    if (cmd === 'A') {
+      while (i < tokens.length && isNum(tokens[i])) {
+        const rx = nextNum();
+        const ry = nextNum();
+        const angle = nextNum();
+        const large = nextNum();
+        const sweep = nextNum();
+        const x = nextNum();
+        const y = nextNum();
+        if (rx === null || ry === null || angle === null || large === null || sweep === null || x === null || y === null) break;
+        out.push(
+          `${rel ? 'a' : 'A'} ${fmt(rx * s)} ${fmt(ry * s)} ${fmt(angle)} ${Math.round(large)} ${Math.round(sweep)} ${fmt(
+            mapX(x, rel),
+          )} ${fmt(mapY(y, rel))}`,
+        );
+      }
+      continue;
+    }
+
+    break;
+  }
+
+  return out.join(' ');
+};
+
 const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const exportShapes = mapShapesToViewBox(shapes, vb);
@@ -1604,6 +1735,7 @@ export {
   mapPointFromViewBox,
   mergePointPair,
   mirrorHandle,
+  mapPathDFromViewBox,
   parseColorToRgba,
   parseSvg,
   pathData,

@@ -48,6 +48,7 @@ import {
   getPathBounds,
   highlightSelectedPathHtml,
   makePoint,
+  mapPathDFromViewBox,
   mapPointFromViewBox,
   mergePointPair,
   mirrorHandle,
@@ -413,7 +414,15 @@ const App = () => {
   const toLocal = (clientX: number, clientY: number, target: SVGSVGElement): Vec =>
     toLocalPoint(clientX, clientY, target, viewOrigin, zoom);
 
-  const pathDs = useMemo(() => shapes.map((shape) => pathData(shape.points, shape.closed)), [shapes]);
+  const pathDs = useMemo(
+    () =>
+      shapes.map((shape) =>
+        !shape.geometryDirty && shape.sourceD && !shape.sourceD.startsWith('<')
+          ? mapPathDFromViewBox(shape.sourceD, docViewBox)
+          : pathData(shape.points, shape.closed),
+      ),
+    [docViewBox, shapes],
+  );
   const defaultDocCode = useMemo(() => serializeSvg(DEFAULT_DOCUMENT.shapes, DEFAULT_DOCUMENT.viewBox), []);
   const hasDefaultViewBox =
     docViewBox.minX === DEFAULT_DOCUMENT.viewBox.minX &&
