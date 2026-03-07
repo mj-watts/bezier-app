@@ -1,4 +1,4 @@
-import { HexAlphaColorPicker } from 'react-colorful';
+import { HexAlphaColorPicker, HexColorInput } from 'react-colorful';
 import { type RefObject } from 'react';
 import { SliderInline } from '../../lib/editor-core';
 import { type StyleMenuState } from '../../types/app-types';
@@ -49,6 +49,13 @@ const StyleMenu = ({
         <>
           <label>
             <HexAlphaColorPicker color={activeFillHex} onChange={onFillChange} />
+            <HexColorInput
+              className="style-menu-color-input"
+              color={activeFillHex}
+              onChange={onFillChange}
+              prefixed
+              alpha
+            />
           </label>
           <button className="control-btn text-sm style-menu-current-color-btn" type="button" onClick={onSetFillCurrentColor}>
             set as currentColor
@@ -62,6 +69,14 @@ const StyleMenu = ({
             <div className={strokeControlDisabled ? 'picker-wrap disabled-stroke' : 'picker-wrap'}>
               <HexAlphaColorPicker color={activeStrokeHex} onChange={onStrokeChange} />
             </div>
+            <HexColorInput
+              className="style-menu-color-input"
+              color={activeStrokeHex}
+              onChange={onStrokeChange}
+              prefixed
+              alpha
+              disabled={strokeControlDisabled}
+            />
           </label>
           <label>
             <SliderInline label="Width" min={0} max={50} value={strokeWidth} unit="px" onChange={onStrokeWidthChange} />

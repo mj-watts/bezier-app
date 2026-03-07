@@ -1,4 +1,4 @@
-import { HexAlphaColorPicker } from 'react-colorful';
+import { HexAlphaColorPicker, HexColorInput } from 'react-colorful';
 import { type RefObject } from 'react';
 import { type CurrentColorMenuState } from '../../types/app-types';
 
@@ -22,6 +22,13 @@ const CurrentColorMenu = ({ menu, menuRef, colorHex, onColorChange }: Props) => 
       <h3>currentColor</h3>
       <label>
         <HexAlphaColorPicker color={colorHex} onChange={onColorChange} />
+        <HexColorInput
+          className="style-menu-color-input"
+          color={colorHex}
+          onChange={onColorChange}
+          prefixed
+          alpha
+        />
       </label>
     </div>
   );

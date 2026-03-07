@@ -112,6 +112,26 @@
   height: 144px;
 }
 
+.style-menu-color-input {
+  width: 100%;
+  border: 1px solid #2f3a49;
+  border-radius: 4px;
+  background: #10161d;
+  color: #e3ebf7;
+  padding: 6px 8px;
+  outline: none;
+  font: inherit;
+}
+
+.style-menu-color-input:focus {
+  border-color: var(--accent-yellow);
+}
+
+.style-menu-color-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .style-menu .slider-inline {
   min-width: 0;
   grid-template-columns: auto minmax(90px, 1fr) 52px auto;
