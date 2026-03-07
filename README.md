@@ -36,11 +36,37 @@ npm run dev
 npm run build
 ```
 
+### Run Desktop App (Tauri)
+
+```bash
+npm run tauri:dev
+```
+
+### Build Desktop App Bundle
+
+```bash
+npm run tauri:build
+```
+
 ### Preview Production Build
 
 ```bash
 npm run preview
 ```
+
+## Web + Desktop Workflow
+
+- The existing Vite app remains the source of truth for the UI.
+- `npm run dev` and `npm run build` still serve and build the web app exactly as before.
+- `npm run tauri:dev` starts the same frontend inside a native Tauri shell for local desktop development.
+- `npm run tauri:build` packages the app as a native desktop bundle.
+
+## Desktop Prerequisites
+
+- Rust toolchain (`rustup`, `cargo`, `rustc`)
+- Xcode Command Line Tools for macOS builds
+
+Without Rust installed, the web app will still run and build normally, but Tauri commands will not work.
 
 ## Project Structure
 

@@ -369,13 +369,6 @@ const EditorCanvas = ({
               />
             ) : null}
           </svg>
-          <p className="hint">
-            {tool === 'pen'
-              ? 'Pen tool: hover anchor to delete point, hover segment to add point, then click. Hold Space to pan.'
-              : tool === 'scale'
-                ? 'Scale tool: drag inside box to move, drag corners to scale. Shift = uniform, Alt/Option = center scale. Hold Space to pan.'
-                : 'Select tool: hover over a point, then drag to move it. Drag handles to edit curvature. Transform box stays visible for selected paths. Hold Space to pan.'}
-          </p>
     </>
   );
 };

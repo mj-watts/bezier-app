@@ -79,9 +79,9 @@ import {
   createStyleMenuState,
   getCenteredOriginForShapes,
   markGeometryDirty,
-  saveSvgFile as saveSvgCodeToFile,
   toLocalPoint,
 } from './lib/app-helpers';
+import { openSvgFile as openSvgTextFromFile, saveSvgFile as saveSvgCodeToFile } from './lib/file-io';
 
 const DEFAULT_ZOOM = 0.5;
 
@@ -1091,8 +1091,14 @@ const App = () => {
     }
   };
 
-  const saveSvgFile = (filename: string) => {
-    saveSvgCodeToFile(codeText, filename);
+  const saveSvgFile = async () => {
+    await saveSvgCodeToFile(codeText, 'drawing.svg');
+  };
+
+  const openSvg = async () => {
+    const svgText = await openSvgTextFromFile();
+    if (!svgText) return;
+    applyCodeText(svgText, true);
   };
 
   const clearDocument = () => {
@@ -1244,7 +1250,12 @@ const App = () => {
     >
       <TopBar
         onOpenAbout={() => setAboutOpen(true)}
-        onSaveSvg={saveSvgFile}
+        onOpenSvg={() => {
+          void openSvg();
+        }}
+        onSaveSvg={() => {
+          void saveSvgFile();
+        }}
         onCopySvg={copySvgCode}
         onClearSvg={clearDocument}
         copied={copied}

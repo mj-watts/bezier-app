@@ -3,36 +3,42 @@ import { Check, X } from 'lucide-react';
 
 type Props = {
   onOpenAbout: () => void;
-  onSaveSvg: (filename: string) => void;
+  onOpenSvg: () => void;
+  onSaveSvg: () => void;
   onCopySvg: () => void;
   onClearSvg: () => void;
   copied: boolean;
 };
 
-const TopBar = ({ onOpenAbout, onSaveSvg, onCopySvg, onClearSvg, copied }: Props) => {
+const TopBar = ({ onOpenAbout, onOpenSvg, onSaveSvg, onCopySvg, onClearSvg, copied }: Props) => {
   const [confirmClear, setConfirmClear] = useState(false);
-  const [saveMenu, setSaveMenu] = useState<{ x: number; y: number; fileName: string } | null>(null);
-  const saveTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const saveMenuRef = useRef<HTMLFormElement | null>(null);
+  const openButtonRef = useRef<HTMLButtonElement | null>(null);
+  const saveButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    if (!saveMenu) return;
-    const onWindowPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node | null;
-      if (!target) return;
-      if (saveMenuRef.current?.contains(target) || saveTriggerRef.current?.contains(target)) return;
-      setSaveMenu(null);
-    };
     const onWindowKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSaveMenu(null);
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      }
+
+      const key = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && key === 'o') {
+        e.preventDefault();
+        onOpenSvg();
+      }
+      if ((e.metaKey || e.ctrlKey) && key === 's') {
+        e.preventDefault();
+        onSaveSvg();
+      }
     };
-    window.addEventListener('pointerdown', onWindowPointerDown, true);
+
     window.addEventListener('keydown', onWindowKeyDown);
     return () => {
-      window.removeEventListener('pointerdown', onWindowPointerDown, true);
       window.removeEventListener('keydown', onWindowKeyDown);
     };
-  }, [saveMenu]);
+  }, [onOpenSvg, onSaveSvg]);
 
   return (
     <header className="topbar">
@@ -46,23 +52,19 @@ const TopBar = ({ onOpenAbout, onSaveSvg, onCopySvg, onClearSvg, copied }: Props
       </button>
       <div className="topbar-actions">
         <button
-          ref={saveTriggerRef}
-          className={`control-btn text-sm${saveMenu ? ' active' : ''}`}
+          ref={openButtonRef}
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (saveMenu) {
-              setSaveMenu(null);
-              return;
-            }
-            const rect = e.currentTarget.getBoundingClientRect();
-            const menuW = 260;
-            const menuH = 120;
-            const pad = 8;
-            const x = Math.max(pad, Math.min(rect.left, window.innerWidth - menuW - pad));
-            const y = Math.max(pad, Math.min(rect.bottom + 6, window.innerHeight - menuH - pad));
-            setSaveMenu({ x, y, fileName: 'drawing.svg' });
-          }}
+          className="control-btn text-sm"
+          onClick={onOpenSvg}
+          title="Open SVG file"
+        >
+          Open
+        </button>
+        <button
+          ref={saveButtonRef}
+          className="control-btn text-sm"
+          type="button"
+          onClick={onSaveSvg}
           title="Save SVG file"
         >
           Save
@@ -95,35 +97,6 @@ const TopBar = ({ onOpenAbout, onSaveSvg, onCopySvg, onClearSvg, copied }: Props
           )}
         </div>
       </div>
-      {saveMenu ? (
-        <form
-          ref={saveMenuRef}
-          className="save-menu"
-          style={{ left: `${saveMenu.x}px`, top: `${saveMenu.y}px` }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSaveSvg(saveMenu.fileName.trim() || 'drawing.svg');
-            setSaveMenu(null);
-          }}
-        >
-          <h3>Save SVG</h3>
-          <label>
-            File name
-            <input
-              value={saveMenu.fileName}
-              onChange={(e) => setSaveMenu((m) => (m ? { ...m, fileName: e.target.value } : m))}
-              placeholder="drawing.svg"
-              autoFocus
-            />
-          </label>
-          <div className="path-meta-actions">
-            <button className="control-btn" type="submit">
-              Save
-            </button>
-          </div>
-        </form>
-      ) : null}
     </header>
   );
 };

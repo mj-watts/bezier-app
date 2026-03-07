@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap');
 
 :root {
-  --bg: #330000;
+  --bg: #11151b;
   --panel: #1a1f26;
   --panel-2: #202630;
   --panel-3: #161b22;
@@ -20,12 +20,19 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100%;
   font-family: 'Manrope', sans-serif;
   color: var(--text);
   background: radial-gradient(1200px 700px at 15% -10%, #252d3a 0%, transparent 65%), var(--bg);
+  overflow: hidden;
 }
 
 button,
@@ -37,9 +44,11 @@ textarea {
 
 .app-shell {
   position: relative;
-  height: 100vh;
+  height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .app-shell,
@@ -294,6 +303,7 @@ textarea {
     8px
     minmax(260px, var(--code-pane-width, 420px))
     minmax(148px, calc(var(--code-pane-width, 420px) / 3));
+  overflow: hidden;
 }
 
 .tool-dock {
@@ -321,9 +331,10 @@ textarea {
 
 .left-pane {
   padding: 12px;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  overflow: hidden;
 }
 
 .paths-pane {
@@ -666,12 +677,15 @@ input[type='checkbox'] {
 }
 
 .editor {
+  flex: 1 1 auto;
   width: 100%;
   height: 100%;
+  min-height: 0;
   border: 1px solid var(--edge);
   border-radius: 4px;
   background: #12161d;
   color: #ffffff;
+  display: block;
 }
 
 .editor:focus,
@@ -858,15 +872,9 @@ input[type='checkbox'] {
   stroke: var(--accent-yellow);
 }
 
-.hint {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
 .right-pane {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr);
   padding: 12px;
   gap: 10px;
 }

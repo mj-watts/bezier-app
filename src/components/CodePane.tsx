@@ -91,7 +91,7 @@ const CodePane = ({
           />
         </div>
 
-        <p className="error">{codeError || '\u00A0'}</p>
+        {codeError ? <p className="error">{codeError}</p> : null}
       </aside>
     </>
   );
