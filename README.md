@@ -7,6 +7,7 @@ A React + TypeScript SVG path editor focused on Illustrator-style path editing: 
 - React 19
 - TypeScript
 - Vite
+- Tauri v2 (desktop shell)
 - Lucide React (icons)
 - MUI Slider
 - react-colorful
@@ -48,6 +49,16 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
+### Tauri (Desktop) Prerequisites
+
+- Rust toolchain (`rustup`, `cargo`, `rustc`)
+- Platform build tools:
+1. macOS: Xcode Command Line Tools
+1. Windows: Visual Studio C++ Build Tools + WebView2
+1. Linux: GTK/WebKitGTK dev packages (distribution-specific)
+
+Without Rust + platform toolchains, web scripts still work (`npm run dev`, `npm run build`), but `tauri:*` scripts will fail.
+
 ### Preview Production Build
 
 ```bash
@@ -60,13 +71,7 @@ npm run preview
 - `npm run dev` and `npm run build` still serve and build the web app exactly as before.
 - `npm run tauri:dev` starts the same frontend inside a native Tauri shell for local desktop development.
 - `npm run tauri:build` packages the app as a native desktop bundle.
-
-## Desktop Prerequisites
-
-- Rust toolchain (`rustup`, `cargo`, `rustc`)
-- Xcode Command Line Tools for macOS builds
-
-Without Rust installed, the web app will still run and build normally, but Tauri commands will not work.
+- Tauri app config lives in `src-tauri/tauri.conf.json`; Rust entrypoints are under `src-tauri/src/`.
 
 ## Project Structure
 

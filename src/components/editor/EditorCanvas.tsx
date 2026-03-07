@@ -39,6 +39,7 @@ type Props = {
   setSelectedPoint: Dispatch<SetStateAction<number>>;
   setSelectedPoints: Dispatch<SetStateAction<number[]>>;
   enterTransformMode: () => void;
+  onPathDoubleClick: (pathIndex: number) => void;
   showViewBox: boolean;
   editorDocViewBox: { minX: number; minY: number; vbW: number; vbH: number };
   docViewBox: { minX: number; minY: number; vbW: number; vbH: number };
@@ -85,6 +86,7 @@ const EditorCanvas = ({
   setSelectedPoint,
   setSelectedPoints,
   enterTransformMode,
+  onPathDoubleClick,
   showViewBox,
   editorDocViewBox,
   docViewBox,
@@ -260,12 +262,16 @@ const EditorCanvas = ({
                       });
                     } else {
                       const all = allPointIndicesForPath(i);
-                      setSelectedPaths([i]);
+                      const preserveGroupSelection = selectedPaths.length > 1 && selectedPaths.includes(i);
+                      if (!preserveGroupSelection) setSelectedPaths([i]);
                       setSelectedPath(i);
                       setSelectedPoint(all[0]);
                       setSelectedPoints(all);
                     }
                   }
+                }}
+                onDoubleClick={() => {
+                  onPathDoubleClick(i);
                 }}
               />
             ))}

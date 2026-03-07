@@ -84,6 +84,31 @@ describe('SVG utils', () => {
     expect(parsed?.shapes[5]?.closed).toBe(true);
   });
 
+  it('parseSvg captures nested group ancestry', () => {
+    const groupedSvg = `<svg viewBox="0 0 10 10">
+      <g id="outer">
+        <path d="M1 1 L2 2" />
+        <g id="inner">
+          <path d="M3 3 L4 4" />
+        </g>
+      </g>
+    </svg>`;
+    const parsed = parseSvg(groupedSvg);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.shapes).toHaveLength(2);
+    expect(parsed?.shapes[0]?.groupChain).toEqual(['outer']);
+    expect(parsed?.shapes[1]?.groupChain).toEqual(['outer', 'inner']);
+  });
+
+  it('parseSvg limits group ancestry depth to 3 levels', () => {
+    const deepGroupedSvg = `<svg viewBox="0 0 10 10">
+      <g id="g1"><g id="g2"><g id="g3"><g id="g4"><path d="M1 1 L2 2" /></g></g></g></g>
+    </svg>`;
+    const parsed = parseSvg(deepGroupedSvg);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.shapes[0]?.groupChain).toEqual(['g1', 'g2', 'g3']);
+  });
+
   it('parseSvg rejects unsupported path commands instead of mis-parsing', () => {
     const unsupportedSvg = `<svg viewBox="0 0 24 24"><path d="M2 2 R 12 0 22 22"/></svg>`;
     expect(parseSvg(unsupportedSvg)).toBeNull();
@@ -150,6 +175,24 @@ describe('SVG utils', () => {
     expect(firstPathTag).not.toContain('stroke="');
     expect(firstPathTag).not.toContain('stroke-width="');
     expect(firstPathTag).toContain('fill="#000000"');
+  });
+
+  it('serializeSvg emits nested groups from groupChain', () => {
+    const groupedSvg = `<svg viewBox="0 0 10 10">
+      <g id="outer">
+        <g id="inner">
+          <path d="M1 1 L2 2" />
+          <path d="M3 3 L4 4" />
+        </g>
+      </g>
+    </svg>`;
+    const parsed = parseSvg(groupedSvg);
+    expect(parsed).not.toBeNull();
+    if (!parsed) return;
+    const out = serializeSvg(parsed.shapes, parsed.viewBox);
+    expect(out).toContain('<g id="outer">');
+    expect(out).toContain('<g id="inner">');
+    expect(out.match(/<path\b/g)?.length ?? 0).toBe(2);
   });
 
   it('pathIndexAtCaret finds the path tag at cursor', () => {

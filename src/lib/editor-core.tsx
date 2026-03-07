@@ -15,6 +15,7 @@ type StrokeLinejoin = 'miter' | 'round' | 'bevel' | 'inherit';
 type PathShape = {
   id: string;
   name: string;
+  groupChain: string[];
   points: Point[];
   uiRotation: number;
   svgId: string;
@@ -108,6 +109,7 @@ type SliderInlineProps = {
 
 const width = 900;
 const height = 560;
+const MAX_GROUP_NESTING = 3;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 8;
 const WORLD_LIMIT = 100000;
@@ -326,6 +328,7 @@ const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: num
   return {
     id: uid(),
     name,
+    groupChain: [],
     points,
     uiRotation: 0,
     svgId: '',
@@ -399,6 +402,7 @@ const clonePoints = (points: Point[]) =>
 const cloneShapes = (shapes: PathShape[]) =>
   shapes.map((shape) => ({
     ...shape,
+    groupChain: [...shape.groupChain],
     points: clonePoints(shape.points),
   }));
 
@@ -816,43 +820,61 @@ const translatePathD = (d: string, tx: number, ty: number): string => {
 const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const exportShapes = mapShapesToViewBox(shapes, vb);
-  const lines = shapes
-    .map((shape, i) => {
-      const exportShape = exportShapes[i];
-      if (!exportShape) return '';
-      const commonAttrs: string[] = [];
-      if (shape.svgId.trim()) commonAttrs.push(`id="${esc(shape.svgId.trim())}"`);
-      if (shape.svgClass.trim()) commonAttrs.push(`class="${esc(shape.svgClass.trim())}"`);
-      if (shape.fillExplicit) commonAttrs.push(`fill="${shape.fill}"`);
-      if (shape.opacityExplicit) commonAttrs.push(`opacity="${Number(shape.opacity.toFixed(4))}"`);
-      const shouldExportStroke = exportShape.strokeWidth > 0;
-      if (shouldExportStroke && shape.strokeExplicit) commonAttrs.push(`stroke="${shape.stroke}"`);
-      if (shouldExportStroke && shape.strokeWidthExplicit) commonAttrs.push(`stroke-width="${Number(exportShape.strokeWidth.toFixed(4))}"`);
-      if (shouldExportStroke && shape.strokeLinecapExplicit) commonAttrs.push(`stroke-linecap="${shape.strokeLinecap}"`);
-      if (shouldExportStroke && shape.strokeLinejoinExplicit) commonAttrs.push(`stroke-linejoin="${shape.strokeLinejoin}"`);
+  const renderShape = (shape: PathShape, exportShape: PathShape, indent: string) => {
+    const commonAttrs: string[] = [];
+    if (shape.svgId.trim()) commonAttrs.push(`id="${esc(shape.svgId.trim())}"`);
+    if (shape.svgClass.trim()) commonAttrs.push(`class="${esc(shape.svgClass.trim())}"`);
+    if (shape.fillExplicit) commonAttrs.push(`fill="${shape.fill}"`);
+    if (shape.opacityExplicit) commonAttrs.push(`opacity="${Number(shape.opacity.toFixed(4))}"`);
+    const shouldExportStroke = exportShape.strokeWidth > 0;
+    if (shouldExportStroke && shape.strokeExplicit) commonAttrs.push(`stroke="${shape.stroke}"`);
+    if (shouldExportStroke && shape.strokeWidthExplicit) commonAttrs.push(`stroke-width="${Number(exportShape.strokeWidth.toFixed(4))}"`);
+    if (shouldExportStroke && shape.strokeLinecapExplicit) commonAttrs.push(`stroke-linecap="${shape.strokeLinecap}"`);
+    if (shouldExportStroke && shape.strokeLinejoinExplicit) commonAttrs.push(`stroke-linejoin="${shape.strokeLinejoin}"`);
 
-      if (!shape.geometryDirty && shape.sourceD?.startsWith('<circle')) {
-        const b = getPathBounds(exportShape.points);
-        if (b) {
-          const r = Math.max(0, Math.min(b.maxX - b.minX, b.maxY - b.minY) / 2);
-          return `  <circle cx="${Number(b.cx.toFixed(4))}" cy="${Number(b.cy.toFixed(4))}" r="${Number(r.toFixed(4))}" ${commonAttrs.join(' ')} />`;
-        }
+    if (!shape.geometryDirty && shape.sourceD?.startsWith('<circle')) {
+      const b = getPathBounds(exportShape.points);
+      if (b) {
+        const r = Math.max(0, Math.min(b.maxX - b.minX, b.maxY - b.minY) / 2);
+        return `${indent}<circle cx="${Number(b.cx.toFixed(4))}" cy="${Number(b.cy.toFixed(4))}" r="${Number(r.toFixed(4))}" ${commonAttrs.join(' ')} />`;
       }
-      if (!shape.geometryDirty && shape.sourceD?.startsWith('<rect')) {
-        const b = getPathBounds(exportShape.points);
-        if (b) {
-          return `  <rect x="${Number(b.minX.toFixed(4))}" y="${Number(b.minY.toFixed(4))}" width="${Number((b.maxX - b.minX).toFixed(4))}" height="${Number((b.maxY - b.minY).toFixed(4))}" ${commonAttrs.join(' ')} />`;
-        }
+    }
+    if (!shape.geometryDirty && shape.sourceD?.startsWith('<rect')) {
+      const b = getPathBounds(exportShape.points);
+      if (b) {
+        return `${indent}<rect x="${Number(b.minX.toFixed(4))}" y="${Number(b.minY.toFixed(4))}" width="${Number((b.maxX - b.minX).toFixed(4))}" height="${Number((b.maxY - b.minY).toFixed(4))}" ${commonAttrs.join(' ')} />`;
       }
+    }
 
-      const d = !shape.geometryDirty && shape.sourceD && !shape.sourceD.startsWith('<') ? shape.sourceD : pathData(exportShape.points, exportShape.closed);
-      const attrs: string[] = [`d="${d}"`, ...commonAttrs];
-      return `  <path ${attrs.join(' ')} />`;
-    })
-    .filter(Boolean)
-    .join('\n');
+    const d = !shape.geometryDirty && shape.sourceD && !shape.sourceD.startsWith('<') ? shape.sourceD : pathData(exportShape.points, exportShape.closed);
+    const attrs: string[] = [`d="${d}"`, ...commonAttrs];
+    return `${indent}<path ${attrs.join(' ')} />`;
+  };
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.minX} ${vb.minY} ${vb.vbW} ${vb.vbH}">\n${lines}\n</svg>`;
+  const lines: string[] = [];
+  const openGroups: string[] = [];
+  for (let i = 0; i < shapes.length; i += 1) {
+    const shape = shapes[i];
+    const exportShape = exportShapes[i];
+    if (!shape || !exportShape) continue;
+    const chain = shape.groupChain ?? [];
+    let common = 0;
+    while (common < openGroups.length && common < chain.length && openGroups[common] === chain[common]) common += 1;
+    for (let j = openGroups.length - 1; j >= common; j -= 1) {
+      lines.push(`${'  '.repeat(j + 1)}</g>`);
+      openGroups.pop();
+    }
+    for (let j = common; j < chain.length; j += 1) {
+      lines.push(`${'  '.repeat(j + 1)}<g id="${esc(chain[j])}">`);
+      openGroups.push(chain[j]);
+    }
+    lines.push(renderShape(shape, exportShape, '  '.repeat(chain.length + 1)));
+  }
+  for (let j = openGroups.length - 1; j >= 0; j -= 1) {
+    lines.push(`${'  '.repeat(j + 1)}</g>`);
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.minX} ${vb.minY} ${vb.vbW} ${vb.vbH}">\n${lines.join('\n')}\n</svg>`;
 };
 
 const formatSvgCode = (input: string): string => {
@@ -1475,16 +1497,36 @@ const autoFitShapesToViewport = (shapes: PathShape[]) => {
 };
 
 const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | null => {
-  const geometryMatches = [...input.matchAll(/<(path|circle|ellipse|rect|line|polyline|polygon)\b[^>]*>/gi)].map((m) => m[0]);
-  if (!geometryMatches.length) return null;
+  const tags = [...input.matchAll(/<[^>]+>/g)].map((m) => m[0]);
+  if (!tags.length) return null;
   const rootDefaults = parseSvgRootStyleDefaults(input);
 
   const shapes: PathShape[] = [];
-
-  for (let k = 0; k < geometryMatches.length; k += 1) {
-    const tag = geometryMatches[k];
-    const tagName = /^<([a-z]+)/i.exec(tag)?.[1]?.toLowerCase();
-    if (!tagName) continue;
+  const geometryTagNames = new Set(['path', 'circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon']);
+  const groupStack: string[] = [];
+  const groupKeyCounts = new Map<string, number>();
+  let autoGroupIndex = 0;
+  const uniqueGroupKey = (raw: string | null) => {
+    const base = (raw ?? '').trim() || `group-${++autoGroupIndex}`;
+    const nextCount = (groupKeyCounts.get(base) ?? 0) + 1;
+    groupKeyCounts.set(base, nextCount);
+    return nextCount === 1 ? base : `${base}-${nextCount}`;
+  };
+  for (const tag of tags) {
+    const closeTagMatch = tag.match(/^<\s*\/\s*([a-z0-9:_-]+)\s*>/i);
+    if (closeTagMatch) {
+      if (closeTagMatch[1].toLowerCase() === 'g' && groupStack.length) groupStack.pop();
+      continue;
+    }
+    const openTagMatch = tag.match(/^<\s*([a-z0-9:_-]+)\b[^>]*>/i);
+    if (!openTagMatch) continue;
+    const tagName = openTagMatch[1].toLowerCase();
+    const selfClosing = /\/\s*>$/.test(tag);
+    if (tagName === 'g') {
+      if (!selfClosing) groupStack.push(uniqueGroupKey(attr(tag, 'id')));
+      continue;
+    }
+    if (!geometryTagNames.has(tagName)) continue;
 
     let points: Point[] | null = null;
     let sourceD: string | null = null;
@@ -1550,7 +1592,8 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
 
     shapes.push({
       id: uid(),
-      name: `Path ${k + 1}`,
+      name: `Path ${shapes.length + 1}`,
+      groupChain: groupStack.slice(0, MAX_GROUP_NESTING),
       points,
       uiRotation: 0,
       svgId,

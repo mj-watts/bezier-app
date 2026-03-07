@@ -3,10 +3,11 @@ import AboutModal from './components/AboutModal';
 import CodePane from './components/CodePane';
 import ControlsBar from './components/ControlsBar';
 import EditorCanvas from './components/editor/EditorCanvas';
-import PathPane from './components/PathPane';
+import PathPane, { type PathPaneRow } from './components/PathPane';
 import ToolDock from './components/ToolDock';
 import TopBar from './components/TopBar';
 import CurrentColorMenu from './components/menus/CurrentColorMenu';
+import GroupMetaMenu from './components/menus/GroupMetaMenu';
 import LucideIconMenu from './components/menus/LucideIconMenu';
 import PathMetaMenu from './components/menus/PathMetaMenu';
 import ShapeMenu from './components/menus/ShapeMenu';
@@ -14,6 +15,7 @@ import StyleMenu from './components/menus/StyleMenu';
 import {
   type CurrentColorMenuState,
   type CursorZoomFocus,
+  type GroupMetaMenuState,
   type LucideMenuState,
   type MarqueeState,
   type PaneDrag,
@@ -84,6 +86,7 @@ import {
 import { openSvgFile as openSvgTextFromFile, saveSvgFile as saveSvgCodeToFile } from './lib/file-io';
 
 const DEFAULT_ZOOM = 0.5;
+const MAX_GROUP_NESTING = 3;
 
 const App = () => {
   const [tool, setTool] = useState<Tool>('select');
@@ -111,6 +114,7 @@ const App = () => {
   const [docViewBox, setDocViewBox] = useState<ViewBox>(DEFAULT_DOCUMENT.viewBox);
   const [copied, setCopied] = useState(false);
   const [pathMetaMenu, setPathMetaMenu] = useState<PathMetaMenuState | null>(null);
+  const [groupMetaMenu, setGroupMetaMenu] = useState<GroupMetaMenuState | null>(null);
   const [styleMenu, setStyleMenu] = useState<StyleMenuState | null>(null);
   const [shapeMenu, setShapeMenu] = useState<ShapeMenuState | null>(null);
   const [lucideMenu, setLucideMenu] = useState<LucideMenuState | null>(null);
@@ -130,6 +134,7 @@ const App = () => {
   const styleTriggerRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const currentColorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const pathMetaMenuRef = useRef<HTMLFormElement | null>(null);
+  const groupMetaMenuRef = useRef<HTMLFormElement | null>(null);
   const shapeMenuRef = useRef<HTMLDivElement | null>(null);
   const lucideMenuRef = useRef<HTMLDivElement | null>(null);
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
@@ -249,6 +254,272 @@ const App = () => {
     });
   };
 
+  const sortUniquePathIndices = (indices: number[]) =>
+    [...new Set(indices)].filter((idx) => idx >= 0 && idx < shapes.length).sort((a, b) => a - b);
+
+  const sameIndexSet = (a: number[], b: number[]) => {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  };
+
+  const hasChainPrefix = (chain: string[], prefix: string[]) => {
+    if (prefix.length > chain.length) return false;
+    for (let i = 0; i < prefix.length; i += 1) {
+      if (chain[i] !== prefix[i]) return false;
+    }
+    return true;
+  };
+
+  const groupMembersForPrefix = (prefix: string[]) =>
+    sortUniquePathIndices(shapes.map((shape, i) => (hasChainPrefix(shape.groupChain ?? [], prefix) ? i : -1)).filter((i) => i >= 0));
+
+  const groupPrefixAtDepth = (pathIndex: number, depthFromNearest: number): string[] | null => {
+    const chain = shapes[pathIndex]?.groupChain ?? [];
+    if (!chain.length) return null;
+    const level = chain.length - 1 - depthFromNearest;
+    if (level < 0 || level >= chain.length) return null;
+    return chain.slice(0, level + 1);
+  };
+
+  const groupMembersAtDepth = (pathIndex: number, depthFromNearest: number): number[] | null => {
+    const base = shapes[pathIndex];
+    if (!base) return null;
+    const chain = base.groupChain ?? [];
+    if (!chain.length) return null;
+    const level = chain.length - 1 - depthFromNearest;
+    if (level < 0 || level >= chain.length) return null;
+    const groupId = chain[level];
+    const prefix = chain.slice(0, level + 1);
+    const members = shapes
+      .map((shape, i) => ({ shape, i }))
+      .filter(({ shape }) => {
+        if ((shape.groupChain?.length ?? 0) <= level) return false;
+        if (shape.groupChain[level] !== groupId) return false;
+        for (let k = 0; k <= level; k += 1) {
+          if (shape.groupChain[k] !== prefix[k]) return false;
+        }
+        return true;
+      })
+      .map(({ i }) => i);
+    return members.length ? sortUniquePathIndices(members) : null;
+  };
+
+  const currentGroupDepthFromSelection = (pathIndex: number) => {
+    const chainLen = shapes[pathIndex]?.groupChain?.length ?? 0;
+    if (!chainLen) return -1;
+    const selected = sortUniquePathIndices(selectedPaths.length ? selectedPaths : [pathIndex]);
+    let matched = -1;
+    for (let depth = 0; depth < chainLen; depth += 1) {
+      const members = groupMembersAtDepth(pathIndex, depth);
+      if (!members) continue;
+      if (sameIndexSet(selected, members)) matched = depth;
+    }
+    return matched;
+  };
+
+  const selectGroupAtDepth = (pathIndex: number, depthFromNearest: number) => {
+    const members = groupMembersAtDepth(pathIndex, depthFromNearest);
+    if (!members || !members.length) return false;
+    const anchorPath = members.includes(pathIndex) ? pathIndex : members[0];
+    const all = allPointIndicesForPath(anchorPath);
+    setPathSelected(true);
+    setSelectedPath(anchorPath);
+    setSelectedPaths(members);
+    setSelectedPoint(all[0]);
+    setSelectedPoints(all);
+    enterTransformMode();
+    return true;
+  };
+
+  const selectNextGroupForPath = (pathIndex: number) => {
+    const chainLen = shapes[pathIndex]?.groupChain?.length ?? 0;
+    if (!chainLen) return false;
+    const currentDepth = currentGroupDepthFromSelection(pathIndex);
+    const nextDepth = currentDepth + 1;
+    if (nextDepth < 0 || nextDepth >= chainLen) return false;
+    return selectGroupAtDepth(pathIndex, nextDepth);
+  };
+
+  const ungroupSelection = () => {
+    if (!pathSelected || !shapes.length) return false;
+    const basePathIndex = selectedPath;
+    const chain = shapes[basePathIndex]?.groupChain ?? [];
+    if (!chain.length) return false;
+
+    const sortedSelection = sortUniquePathIndices(selectedPaths.length ? selectedPaths : [basePathIndex]);
+    const exactDepth = currentGroupDepthFromSelection(basePathIndex);
+    const targetPrefix = exactDepth >= 0 ? groupPrefixAtDepth(basePathIndex, exactDepth) : groupPrefixAtDepth(basePathIndex, 0);
+    if (!targetPrefix?.length) return false;
+
+    const removeAt = targetPrefix.length - 1;
+    const targetMembers = groupMembersForPrefix(targetPrefix);
+    if (!targetMembers.length) return false;
+    const memberSet = new Set(targetMembers);
+
+    pushUndo();
+    setShapes((curr) =>
+      curr.map((shape, i) => {
+        if (!memberSet.has(i)) return shape;
+        const currentChain = shape.groupChain ?? [];
+        if (!hasChainPrefix(currentChain, targetPrefix)) return shape;
+        if (removeAt >= currentChain.length) return shape;
+        return { ...shape, groupChain: [...currentChain.slice(0, removeAt), ...currentChain.slice(removeAt + 1)] };
+      }),
+    );
+
+    const nextSelection = exactDepth >= 0 ? targetMembers : sortedSelection;
+    const nextPrimary = nextSelection.includes(basePathIndex) ? basePathIndex : nextSelection[0];
+    const all = allPointIndicesForPath(nextPrimary);
+    setPathSelected(true);
+    setSelectedPath(nextPrimary);
+    setSelectedPaths(nextSelection);
+    setSelectedPoint(all[0]);
+    setSelectedPoints(all);
+    enterTransformMode();
+    return true;
+  };
+
+  const movePath = (fromPathIndex: number, toPathIndex: number, placement: 'before' | 'after', nextGroupChain: string[]) => {
+    if (fromPathIndex < 0 || toPathIndex < 0 || fromPathIndex >= shapes.length || toPathIndex >= shapes.length) return;
+
+    const original = shapes.map((_, i) => i);
+    const moved = original[fromPathIndex];
+    if (moved === undefined) return;
+    const without = original.filter((i) => i !== moved);
+    let insertAt = placement === 'before' ? toPathIndex : toPathIndex + 1;
+    if (fromPathIndex < insertAt) insertAt -= 1;
+    insertAt = clamp(insertAt, 0, without.length);
+    without.splice(insertAt, 0, moved);
+
+    const oldToNew = new Map<number, number>();
+    for (let newIndex = 0; newIndex < without.length; newIndex += 1) {
+      oldToNew.set(without[newIndex], newIndex);
+    }
+
+    pushUndo();
+    setShapes((curr) => {
+      const nextCurr = curr.map((shape, i) => (i === fromPathIndex ? { ...shape, groupChain: [...nextGroupChain] } : shape));
+      return without.map((oldIndex) => nextCurr[oldIndex]).filter((shape): shape is PathShape => !!shape);
+    });
+    setSelectedPath((prev) => oldToNew.get(prev) ?? prev);
+    setSelectedPaths((prev) => [...new Set(prev.map((i) => oldToNew.get(i) ?? i))].sort((a, b) => a - b));
+    setPathMetaMenu((menu) => (menu ? { ...menu, pathIndex: oldToNew.get(menu.pathIndex) ?? menu.pathIndex } : menu));
+    setGroupMetaMenu((menu) => (menu ? { ...menu, pathIndex: oldToNew.get(menu.pathIndex) ?? menu.pathIndex } : menu));
+  };
+
+  const reorderPaths = (fromPathIndex: number, toPathIndex: number, placement: 'before' | 'after') => {
+    const targetParent = [...(shapes[toPathIndex]?.groupChain ?? [])];
+    movePath(fromPathIndex, toPathIndex, placement, targetParent);
+  };
+
+  const dropPathOnGroup = (fromPathIndex: number, targetPathIndex: number, groupDepth: number) => {
+    const chain = shapes[targetPathIndex]?.groupChain ?? [];
+    if (groupDepth < 0 || groupDepth >= chain.length) return;
+    const targetPrefix = chain.slice(0, groupDepth + 1);
+    const groupMembers = shapes
+      .map((shape, i) => (hasChainPrefix(shape.groupChain ?? [], targetPrefix) ? i : -1))
+      .filter((i) => i >= 0 && i !== fromPathIndex);
+    const anchor = groupMembers.length ? groupMembers[groupMembers.length - 1] : targetPathIndex;
+    movePath(fromPathIndex, anchor, 'after', targetPrefix);
+  };
+
+  const dropPathOnUngrouped = (fromPathIndex: number) => {
+    if (fromPathIndex < 0 || fromPathIndex >= shapes.length) return;
+    const ungrouped = shapes.map((shape, i) => (!(shape.groupChain?.length ?? 0) ? i : -1)).filter((i) => i >= 0 && i !== fromPathIndex);
+    if (ungrouped.length) {
+      movePath(fromPathIndex, ungrouped[0], 'before', []);
+      return;
+    }
+    const anchor = clamp(fromPathIndex, 0, shapes.length - 1);
+    movePath(fromPathIndex, anchor, 'after', []);
+  };
+
+  const groupSelectedPaths = () => {
+    const baseSelection = sortUniquePathIndices(pathSelected && selectedPaths.length ? selectedPaths : [selectedPath]);
+    if (baseSelection.length < 2) return false;
+
+    const selectedSet = new Set(baseSelection);
+    const chains = baseSelection.map((idx) => shapes[idx]?.groupChain ?? []);
+    const firstChain = chains[0] ?? [];
+    let prefixLen = firstChain.length;
+    for (let c = 1; c < chains.length; c += 1) {
+      prefixLen = Math.min(prefixLen, chains[c].length);
+      for (let i = 0; i < prefixLen; i += 1) {
+        if (chains[c][i] !== firstChain[i]) {
+          prefixLen = i;
+          break;
+        }
+      }
+    }
+    const parentPrefix = firstChain.slice(0, prefixLen);
+    if (parentPrefix.length >= MAX_GROUP_NESTING) return false;
+    const exceedsNestingLimit = baseSelection.some((idx) => (shapes[idx]?.groupChain?.length ?? 0) + 1 > MAX_GROUP_NESTING);
+    if (exceedsNestingLimit) return false;
+
+    // Prevent redundant nested groups when the exact selection is already one group.
+    const seen = new Set<string>();
+    for (const shape of shapes) {
+      const chain = shape.groupChain ?? [];
+      for (let depth = 0; depth < chain.length; depth += 1) {
+        const prefix = chain.slice(0, depth + 1);
+        const key = prefix.join('\u0001');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const members = groupMembersForPrefix(prefix);
+        if (sameIndexSet(members, baseSelection)) return false;
+      }
+    }
+
+    const usedGroupIds = new Set(shapes.flatMap((shape) => shape.groupChain ?? []));
+    let nextGroupIndex = 1;
+    let groupId = `group-${nextGroupIndex}`;
+    while (usedGroupIds.has(groupId)) {
+      nextGroupIndex += 1;
+      groupId = `group-${nextGroupIndex}`;
+    }
+
+    pushUndo();
+    setShapes((curr) => {
+      const insertAt = parentPrefix.length;
+      const mapped = curr.map((shape, i) => {
+        if (!selectedSet.has(i)) return shape;
+        const chain = shape.groupChain ?? [];
+        return { ...shape, groupChain: [...chain.slice(0, insertAt), groupId, ...chain.slice(insertAt)] };
+      });
+
+      // Make grouped siblings contiguous so serializer emits a single <g id="..."> block.
+      const inScope = mapped
+        .map((shape, i) => (hasChainPrefix(shape.groupChain ?? [], parentPrefix) ? i : -1))
+        .filter((i) => i >= 0);
+      const selectedScope = inScope.filter((i) => selectedSet.has(i));
+      const unselectedScope = inScope.filter((i) => !selectedSet.has(i));
+      const reorderedScope = [...selectedScope, ...unselectedScope];
+      const next = [...mapped];
+      const oldToNew = new Map<number, number>();
+      for (let i = 0; i < inScope.length; i += 1) {
+        const targetIndex = inScope[i];
+        const sourceIndex = reorderedScope[i];
+        next[targetIndex] = mapped[sourceIndex];
+        oldToNew.set(sourceIndex, targetIndex);
+      }
+
+      const remappedSelection = [...new Set(baseSelection.map((i) => oldToNew.get(i) ?? i))].sort((a, b) => a - b);
+      const nextPrimary = oldToNew.get(baseSelection[0]) ?? baseSelection[0];
+      const all = next[nextPrimary]?.points.map((_, i) => i) ?? [0];
+      setPathSelected(true);
+      setSelectedPath(nextPrimary);
+      setSelectedPaths(remappedSelection);
+      setSelectedPoint(all[0]);
+      setSelectedPoints(all);
+      return next;
+    });
+    enterTransformMode();
+    return true;
+  };
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
@@ -301,6 +572,16 @@ const App = () => {
         setSelectedPoint(all[0] ?? 0);
         setSelectedPoints(all.length ? all : [0]);
         enterTransformMode();
+      }
+      if ((e.metaKey || e.ctrlKey) && key === 'g') {
+        e.preventDefault();
+        if (e.shiftKey) ungroupSelection();
+        else groupSelectedPaths();
+      }
+      if (key === 'enter') {
+        if (!pathSelected) return;
+        e.preventDefault();
+        selectNextGroupForPath(selectedPath);
       }
       if (key === 'delete' || key === 'backspace') {
         e.preventDefault();
@@ -1142,6 +1423,7 @@ const App = () => {
     const path = shapes[pathIndex];
     if (!path) return;
     setPathMetaMenu(createPathMetaMenuState(pathIndex, path, rect, { width: window.innerWidth, height: window.innerHeight }));
+    setGroupMetaMenu(null);
     setShapeMenu(null);
     setLucideMenu(null);
     setStyleMenu(null);
@@ -1160,11 +1442,123 @@ const App = () => {
     setPathMetaMenu(null);
   };
 
+  const openGroupMetaMenu = (pathIndex: number, depth: number, rect: DOMRect) => {
+    const path = shapes[pathIndex];
+    const idValue = path?.groupChain?.[depth];
+    if (!path || !idValue) return;
+    const menuWidth = 260;
+    const menuHeight = 154;
+    const margin = 8;
+    const x = Math.min(rect.left, window.innerWidth - menuWidth - margin);
+    const y = Math.min(rect.bottom + 6, window.innerHeight - menuHeight - margin);
+    setGroupMetaMenu({ pathIndex, depth, x, y, idValue });
+    setPathMetaMenu(null);
+    setShapeMenu(null);
+    setLucideMenu(null);
+    setStyleMenu(null);
+    setCurrentColorMenu(null);
+  };
+
+  const applyGroupMetaMenu = () => {
+    if (!groupMetaMenu) return;
+    const sourceShape = shapes[groupMetaMenu.pathIndex];
+    const chain = sourceShape?.groupChain ?? [];
+    const oldId = chain[groupMetaMenu.depth];
+    const newId = groupMetaMenu.idValue.trim();
+    if (!oldId || !newId || oldId === newId) {
+      setGroupMetaMenu(null);
+      return;
+    }
+    const prefix = chain.slice(0, groupMetaMenu.depth);
+    pushUndo();
+    setShapes((curr) =>
+      curr.map((shape) => {
+        const nextChain = shape.groupChain ?? [];
+        if ((nextChain.length ?? 0) <= groupMetaMenu.depth) return shape;
+        if (!hasChainPrefix(nextChain, prefix)) return shape;
+        if (nextChain[groupMetaMenu.depth] !== oldId) return shape;
+        const replaced = [...nextChain];
+        replaced[groupMetaMenu.depth] = newId;
+        return { ...shape, groupChain: replaced };
+      }),
+    );
+    setGroupMetaMenu(null);
+  };
+
+  const selectGroupAtAbsoluteDepth = (pathIndex: number, groupDepth: number) => {
+    const chainLen = shapes[pathIndex]?.groupChain?.length ?? 0;
+    if (!chainLen) return false;
+    if (groupDepth < 0 || groupDepth >= chainLen) return false;
+    return selectGroupAtDepth(pathIndex, chainLen - 1 - groupDepth);
+  };
+
+  const pathPaneRows = useMemo<PathPaneRow[]>(() => {
+    const rows: PathPaneRow[] = [];
+    const selectedSetSorted = pathSelected ? sortUniquePathIndices(selectedPaths.length ? selectedPaths : [selectedPath]) : [];
+    const groupedIndices = shapes
+      .map((shape, i) => (shape.groupChain?.length ? i : -1))
+      .filter((i) => i >= 0)
+      .reverse();
+    const ungroupedIndices = shapes
+      .map((shape, i) => (!(shape.groupChain?.length ?? 0) ? i : -1))
+      .filter((i) => i >= 0)
+      .reverse();
+
+    const appendRows = (indices: number[], includeGroups: boolean) => {
+      const openGroups: string[] = [];
+      for (const i of indices) {
+        const shape = shapes[i];
+        if (!shape) continue;
+        const chain = shape.groupChain ?? [];
+
+        if (includeGroups) {
+          let common = 0;
+          while (common < openGroups.length && common < chain.length && openGroups[common] === chain[common]) common += 1;
+          openGroups.length = common;
+
+          for (let depth = common; depth < chain.length; depth += 1) {
+            const prefix = chain.slice(0, depth + 1);
+            const members = groupMembersForPrefix(prefix);
+            rows.push({
+              key: `group:${prefix.join('\u0001')}`,
+              kind: 'group',
+              depth,
+              label: chain[depth],
+              pathIndex: i,
+              groupDepth: depth,
+              selected: pathSelected && sameIndexSet(selectedSetSorted, members),
+            });
+            openGroups.push(chain[depth]);
+          }
+        }
+
+        rows.push({
+          key: `path:${shape.id}`,
+          kind: 'path',
+          depth: includeGroups ? chain.length : 0,
+          pathIndex: i,
+          label: shape.svgId.trim() || shape.name,
+          selected: pathSelected && (selectedPath === i || selectedPaths.includes(i)),
+          menuOpen: pathMetaMenu?.pathIndex === i,
+        });
+      }
+    };
+
+    appendRows(groupedIndices, true);
+    if (groupedIndices.length && ungroupedIndices.length) {
+      rows.push({ key: 'divider:grouped-ungrouped', kind: 'divider' });
+    }
+    appendRows(ungroupedIndices, false);
+
+    return rows;
+  }, [shapes, pathSelected, selectedPaths, selectedPath, pathMetaMenu]);
+
   const openStyleMenu = (kind: StylePanel, rect: DOMRect) => {
     setStyleMenu(createStyleMenuState(kind, rect, { width: window.innerWidth, height: window.innerHeight }));
     setShapeMenu(null);
     setLucideMenu(null);
     setPathMetaMenu(null);
+    setGroupMetaMenu(null);
     setCurrentColorMenu(null);
   };
 
@@ -1174,6 +1568,7 @@ const App = () => {
     setLucideMenu(null);
     setStyleMenu(null);
     setPathMetaMenu(null);
+    setGroupMetaMenu(null);
   };
 
   const openLucideMenu = (rect: DOMRect) => {
@@ -1181,6 +1576,7 @@ const App = () => {
     setShapeMenu(null);
     setStyleMenu(null);
     setPathMetaMenu(null);
+    setGroupMetaMenu(null);
     setCurrentColorMenu(null);
   };
 
@@ -1198,11 +1594,12 @@ const App = () => {
   }, [aboutOpen]);
 
   useEffect(() => {
-    if (!pathMetaMenu && !shapeMenu && !lucideMenu && !styleMenu && !currentColorMenu) return;
+    if (!pathMetaMenu && !groupMetaMenu && !shapeMenu && !lucideMenu && !styleMenu && !currentColorMenu) return;
     const onWindowPointerDown = (e: PointerEvent) => {
       const target = e.target as Node | null;
       if (!target) return;
       const inPathMeta = !!pathMetaMenuRef.current?.contains(target);
+      const inGroupMeta = !!groupMetaMenuRef.current?.contains(target);
       const inShapeMenu = !!shapeMenuRef.current?.contains(target);
       const inLucideMenu = !!lucideMenuRef.current?.contains(target);
       const inStyleMenu = !!styleMenuRef.current?.contains(target);
@@ -1213,6 +1610,7 @@ const App = () => {
       const inCurrentColorTrigger = !!currentColorTriggerRef.current?.contains(target);
       if (
         inPathMeta ||
+        inGroupMeta ||
         inShapeMenu ||
         inLucideMenu ||
         inStyleMenu ||
@@ -1225,6 +1623,7 @@ const App = () => {
         return;
       }
       setPathMetaMenu(null);
+      setGroupMetaMenu(null);
       setShapeMenu(null);
       setLucideMenu(null);
       setStyleMenu(null);
@@ -1233,7 +1632,7 @@ const App = () => {
     };
     window.addEventListener('pointerdown', onWindowPointerDown, true);
     return () => window.removeEventListener('pointerdown', onWindowPointerDown, true);
-  }, [pathMetaMenu, shapeMenu, lucideMenu, styleMenu, currentColorMenu]);
+  }, [pathMetaMenu, groupMetaMenu, shapeMenu, lucideMenu, styleMenu, currentColorMenu]);
 
   return (
     <div
@@ -1241,6 +1640,7 @@ const App = () => {
       className="app-shell"
       onPointerDown={() => {
         setPathMetaMenu(null);
+        setGroupMetaMenu(null);
         setShapeMenu(null);
         setLucideMenu(null);
         setStyleMenu(null);
@@ -1287,6 +1687,7 @@ const App = () => {
             setLucideMenu(null);
             setStyleMenu(null);
             setPathMetaMenu(null);
+            setGroupMetaMenu(null);
             setCurrentColorMenu(null);
           }}
           onOpenLucideMenu={openLucideMenu}
@@ -1380,6 +1781,9 @@ const App = () => {
             setSelectedPoint={setSelectedPoint}
             setSelectedPoints={setSelectedPoints}
             enterTransformMode={enterTransformMode}
+            onPathDoubleClick={(pathIndex) => {
+              selectNextGroupForPath(pathIndex);
+            }}
             showViewBox={showViewBox}
             editorDocViewBox={editorDocViewBox}
             docViewBox={docViewBox}
@@ -1448,10 +1852,7 @@ const App = () => {
         />
 
         <PathPane
-          shapes={shapes.map((shape) => ({ id: shape.id, name: shape.name, svgId: shape.svgId }))}
-          pathSelected={pathSelected}
-          selectedPath={selectedPath}
-          pathMetaMenuPathIndex={pathMetaMenu?.pathIndex ?? null}
+          rows={pathPaneRows}
           onPathDoubleClick={(pathIndex, rect) => openPathMetaMenu(pathIndex, rect)}
           onPathClick={(pathIndex) => {
             const all = allPointIndicesForPath(pathIndex);
@@ -1462,6 +1863,13 @@ const App = () => {
             setSelectedPoints(all);
             enterTransformMode();
           }}
+          onGroupRenameClick={(pathIndex, groupDepth, rect) => openGroupMetaMenu(pathIndex, groupDepth, rect)}
+          onGroupDoubleClick={(pathIndex, groupDepth) => {
+            selectGroupAtAbsoluteDepth(pathIndex, groupDepth);
+          }}
+          onReorderPath={reorderPaths}
+          onDropPathOnGroup={dropPathOnGroup}
+          onDropPathOnUngrouped={dropPathOnUngrouped}
           confirmDeletePath={confirmDeletePath}
           canDeletePath={canDeletePath}
           onRequestDelete={() => {
@@ -1482,6 +1890,13 @@ const App = () => {
         onApply={applyPathMetaMenu}
         onIdValueChange={(next) => setPathMetaMenu((m) => (m ? { ...m, idValue: next } : m))}
         onClassValueChange={(next) => setPathMetaMenu((m) => (m ? { ...m, classValue: next } : m))}
+      />
+      <GroupMetaMenu
+        menu={groupMetaMenu}
+        menuRef={groupMetaMenuRef}
+        onClose={() => setGroupMetaMenu(null)}
+        onApply={applyGroupMetaMenu}
+        onIdValueChange={(next) => setGroupMetaMenu((m) => (m ? { ...m, idValue: next } : m))}
       />
       <ShapeMenu menu={shapeMenu} menuRef={shapeMenuRef} onAddPreset={addPresetPath} />
       <LucideIconMenu menu={lucideMenu} menuRef={lucideMenuRef} onClose={() => setLucideMenu(null)} onSelectIcon={addLucideIcon} />

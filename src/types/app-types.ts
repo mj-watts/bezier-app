@@ -12,6 +12,14 @@ export type PathMetaMenuState = {
   classValue: string;
 };
 
+export type GroupMetaMenuState = {
+  pathIndex: number;
+  depth: number;
+  x: number;
+  y: number;
+  idValue: string;
+};
+
 export type StyleMenuState = { kind: StylePanel; x: number; y: number };
 export type ShapeMenuState = { x: number; y: number };
 export type CurrentColorMenuState = { x: number; y: number };
