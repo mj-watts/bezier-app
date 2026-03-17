@@ -2,6 +2,7 @@ import { type Dispatch, type MouseEvent, type MutableRefObject, type PointerEven
 import {
   getPathBounds,
   height,
+  pathData,
   sampleBezier,
   type DragTarget,
   type PathShape,
@@ -113,6 +114,15 @@ const EditorCanvas = ({
   const scaleY = svgElement ? svgElement.clientHeight / (height / zoom) : zoom;
   const screenScale = Math.max(0.0001, Math.min(scaleX, scaleY));
   const worldUnitsPerPx = 1 / screenScale;
+  const clipDefs = new Map<string, { id: string; d: string }>();
+  for (const shape of shapes) {
+    const ref = shape.clipPathRef.trim();
+    if (!ref || !shape.clipPathPoints?.length || clipDefs.has(ref)) continue;
+    clipDefs.set(ref, {
+      id: `clipdef-${clipDefs.size}`,
+      d: shape.clipPathMappedD ?? pathData(shape.clipPathPoints, shape.clipPathClosed),
+    });
+  }
 
   return (
     <>
@@ -151,6 +161,11 @@ const EditorCanvas = ({
                 <rect width="120" height="120" fill="url(#grid-small)" />
                 <path d="M 120 0 L 0 0 0 120" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
               </pattern>
+              {[...clipDefs.values()].map((clip) => (
+                <clipPath key={clip.id} id={clip.id} clipPathUnits="userSpaceOnUse">
+                  <path d={clip.d} />
+                </clipPath>
+              ))}
             </defs>
             <rect
               x={-WORLD_LIMIT}
@@ -239,6 +254,12 @@ const EditorCanvas = ({
               <path
                 key={shape.id}
                 d={pathDs[i]}
+                clipPath={(() => {
+                  const ref = shape.clipPathRef.trim();
+                  if (!ref) return undefined;
+                  const clip = clipDefs.get(ref);
+                  return clip ? `url(#${clip.id})` : undefined;
+                })()}
                 fill={shape.fillExplicit ? shape.fill : 'currentColor'}
                 stroke={shape.strokeExplicit ? shape.stroke : 'none'}
                 strokeWidth={shape.strokeWidthExplicit ? shape.strokeWidth : undefined}

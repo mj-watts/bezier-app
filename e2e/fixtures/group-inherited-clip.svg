@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120">
+  <defs>
+    <clipPath id="pill">
+      <path d="M20 60 C20 35 35 20 60 20 H140 C165 20 180 35 180 60 C180 85 165 100 140 100 H60 C35 100 20 85 20 60 Z" />
+    </clipPath>
+  </defs>
+  <g
+    id="strokes2"
+    fill="none"
+    stroke="#9099f5"
+    stroke-width="20"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    clip-path="url(#pill)"
+  >
+    <path d="M10 30 C60 10 140 110 190 90" />
+    <path d="M10 90 C70 110 130 10 190 30" />
+  </g>
+</svg>

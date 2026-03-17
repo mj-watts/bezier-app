@@ -35,6 +35,11 @@ type PathShape = {
   strokeLinejoinExplicit: boolean;
   opacityExplicit: boolean;
   closed: boolean;
+  clipPathRef: string;
+  clipPathPoints: Point[] | null;
+  clipPathClosed: boolean;
+  clipPathSourceD: string | null;
+  clipPathMappedD: string | null;
 };
 
 type Tool = 'select' | 'pen' | 'scale';
@@ -348,6 +353,11 @@ const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: num
     strokeLinejoinExplicit: false,
     opacityExplicit: false,
     closed: true,
+    clipPathRef: '',
+    clipPathPoints: null,
+    clipPathClosed: false,
+    clipPathSourceD: null,
+    clipPathMappedD: null,
   };
 };
 
@@ -404,6 +414,7 @@ const cloneShapes = (shapes: PathShape[]) =>
     ...shape,
     groupChain: [...shape.groupChain],
     points: clonePoints(shape.points),
+    clipPathPoints: shape.clipPathPoints ? clonePoints(shape.clipPathPoints) : null,
   }));
 
 const clonePoint = (pt: Point): Point => ({
@@ -563,6 +574,15 @@ const mapShapesToViewBox = (shapes: PathShape[], vb: ViewBox) =>
         in: pt.in ? mapPointToViewBox(pt.in, vb) : null,
         out: pt.out ? mapPointToViewBox(pt.out, vb) : null,
       })),
+      clipPathPoints: shape.clipPathPoints
+        ? shape.clipPathPoints.map((pt) => ({
+            ...pt,
+            p: mapPointToViewBox(pt.p, vb),
+            in: pt.in ? mapPointToViewBox(pt.in, vb) : null,
+            out: pt.out ? mapPointToViewBox(pt.out, vb) : null,
+          }))
+        : null,
+      clipPathMappedD: null,
     };
   });
 
@@ -824,6 +844,7 @@ const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
     const commonAttrs: string[] = [];
     if (shape.svgId.trim()) commonAttrs.push(`id="${esc(shape.svgId.trim())}"`);
     if (shape.svgClass.trim()) commonAttrs.push(`class="${esc(shape.svgClass.trim())}"`);
+    if (shape.clipPathRef.trim() && exportShape.clipPathPoints?.length) commonAttrs.push(`clip-path="url(#${esc(shape.clipPathRef.trim())})"`);
     if (shape.fillExplicit) commonAttrs.push(`fill="${shape.fill}"`);
     if (shape.opacityExplicit) commonAttrs.push(`opacity="${Number(shape.opacity.toFixed(4))}"`);
     const shouldExportStroke = exportShape.strokeWidth > 0;
@@ -852,6 +873,21 @@ const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
   };
 
   const lines: string[] = [];
+  const clipDefLines: string[] = [];
+  const emittedClipDefs = new Set<string>();
+  for (let i = 0; i < shapes.length; i += 1) {
+    const shape = shapes[i];
+    const exportShape = exportShapes[i];
+    if (!shape || !exportShape) continue;
+    const clipRef = shape.clipPathRef.trim();
+    if (!clipRef || emittedClipDefs.has(clipRef) || !exportShape.clipPathPoints?.length) continue;
+    emittedClipDefs.add(clipRef);
+    clipDefLines.push(
+      `    <clipPath id="${esc(clipRef)}">`,
+      `      <path d="${pathData(exportShape.clipPathPoints, exportShape.clipPathClosed)}" />`,
+      `    </clipPath>`,
+    );
+  }
   const openGroups: string[] = [];
   for (let i = 0; i < shapes.length; i += 1) {
     const shape = shapes[i];
@@ -874,7 +910,8 @@ const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
     lines.push(`${'  '.repeat(j + 1)}</g>`);
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.minX} ${vb.minY} ${vb.vbW} ${vb.vbH}">\n${lines.join('\n')}\n</svg>`;
+  const defsBlock = clipDefLines.length ? `  <defs>\n${clipDefLines.join('\n')}\n  </defs>\n` : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.minX} ${vb.minY} ${vb.vbW} ${vb.vbH}">\n${defsBlock}${lines.join('\n')}\n</svg>`;
 };
 
 const formatSvgCode = (input: string): string => {
@@ -918,9 +955,9 @@ const formatSvgCode = (input: string): string => {
 
 const attr = (text: string, name: string) => {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const quoted = text.match(new RegExp(`${escaped}\\s*=\\s*(['"])(.*?)\\1`, 'i'));
+  const quoted = text.match(new RegExp(`(?:^|\\s)${escaped}\\s*=\\s*(['"])([\\s\\S]*?)\\1`, 'i'));
   if (quoted) return quoted[2];
-  const unquoted = text.match(new RegExp(`${escaped}\\s*=\\s*([^\\s>]+)`, 'i'));
+  const unquoted = text.match(new RegExp(`(?:^|\\s)${escaped}\\s*=\\s*([^\\s>]+)`, 'i'));
   return unquoted ? unquoted[1] : null;
 };
 
@@ -1403,6 +1440,73 @@ const parsePointsAttribute = (tag: string): Point[] | null => {
   return out;
 };
 
+const parseClipPathRef = (value: string | null): string | null => {
+  if (!value) return null;
+  const m = value.trim().match(/^url\(\s*['"]?#([^'")\s]+)['"]?\s*\)$/i);
+  return m?.[1]?.trim() || null;
+};
+
+const parseGeometryTag = (tagName: string, tag: string): { points: Point[]; sourceD: string | null; closed: boolean } | null => {
+  if (tagName === 'path') {
+    const d = attr(tag, 'd');
+    if (!d) return null;
+    const parsed = parsePathD(d);
+    if (!parsed) return null;
+    return { points: parsed.points, sourceD: d, closed: parsed.closed };
+  }
+  if (tagName === 'circle') {
+    const points = parseCirclePoints(tag);
+    if (!points) return null;
+    return { points, sourceD: null, closed: true };
+  }
+  if (tagName === 'ellipse') {
+    const points = parseEllipsePoints(tag);
+    if (!points) return null;
+    return { points, sourceD: null, closed: true };
+  }
+  if (tagName === 'rect') {
+    const points = parseRectPoints(tag);
+    if (!points) return null;
+    return { points, sourceD: null, closed: true };
+  }
+  if (tagName === 'line') {
+    const points = parseLinePoints(tag);
+    if (!points) return null;
+    return { points, sourceD: null, closed: false };
+  }
+  if (tagName === 'polyline') {
+    const points = parsePointsAttribute(tag);
+    if (!points || points.length < 2) return null;
+    return { points, sourceD: null, closed: false };
+  }
+  if (tagName === 'polygon') {
+    const points = parsePointsAttribute(tag);
+    if (!points || points.length < 2) return null;
+    const first = points[0].p;
+    const last = points[points.length - 1].p;
+    if (Math.hypot(first.x - last.x, first.y - last.y) < 0.001 && points.length > 2) points.pop();
+    return { points, sourceD: null, closed: true };
+  }
+  return null;
+};
+
+const parseClipPathGeometryMap = (input: string) => {
+  const out = new Map<string, { points: Point[]; closed: boolean; sourceD: string | null }>();
+  for (const block of input.matchAll(/<clipPath\b[^>]*>[\s\S]*?<\/clipPath>/gi)) {
+    const raw = block[0];
+    const openTag = raw.match(/<clipPath\b[^>]*>/i)?.[0];
+    if (!openTag) continue;
+    const id = attr(openTag, 'id')?.trim();
+    if (!id || out.has(id)) continue;
+    const geometryMatch = raw.match(/<(path|circle|ellipse|rect|line|polyline|polygon)\b[^>]*>/i);
+    if (!geometryMatch) continue;
+    const parsed = parseGeometryTag(geometryMatch[1].toLowerCase(), geometryMatch[0]);
+    if (!parsed) continue;
+    out.set(id, { points: parsed.points, closed: parsed.closed, sourceD: parsed.sourceD });
+  }
+  return out;
+};
+
 const parseViewBox = (input: string) => {
   const svgOpen = input.match(/<svg\b[^>]*>/i)?.[0];
   if (!svgOpen) return null;
@@ -1457,6 +1561,15 @@ const mapShapesFromViewBox = (shapes: PathShape[], vb: { minX: number; minY: num
         in: pt.in ? mapPointFromViewBox(pt.in, vb) : null,
         out: pt.out ? mapPointFromViewBox(pt.out, vb) : null,
       })),
+      clipPathPoints: shape.clipPathPoints
+        ? shape.clipPathPoints.map((pt) => ({
+            ...pt,
+            p: mapPointFromViewBox(pt.p, vb),
+            in: pt.in ? mapPointFromViewBox(pt.in, vb) : null,
+            out: pt.out ? mapPointFromViewBox(pt.out, vb) : null,
+          }))
+        : null,
+      clipPathMappedD: shape.clipPathSourceD ? mapPathDFromViewBox(shape.clipPathSourceD, vb) : null,
     };
   });
 
@@ -1493,6 +1606,15 @@ const autoFitShapesToViewport = (shapes: PathShape[]) => {
       in: pt.in ? map(pt.in) : null,
       out: pt.out ? map(pt.out) : null,
     })),
+    clipPathPoints: shape.clipPathPoints
+      ? shape.clipPathPoints.map((pt) => ({
+          ...pt,
+          p: map(pt.p),
+          in: pt.in ? map(pt.in) : null,
+          out: pt.out ? map(pt.out) : null,
+        }))
+      : null,
+    clipPathMappedD: null,
   }));
 };
 
@@ -1500,11 +1622,24 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
   const tags = [...input.matchAll(/<[^>]+>/g)].map((m) => m[0]);
   if (!tags.length) return null;
   const rootDefaults = parseSvgRootStyleDefaults(input);
+  const clipPathGeometryMap = parseClipPathGeometryMap(input);
+  type StyleDefaults = {
+    fill: string | null;
+    stroke: string | null;
+    strokeWidth: string | null;
+    strokeLinecap: string | null;
+    strokeLinejoin: string | null;
+    opacity: string | null;
+  };
 
   const shapes: PathShape[] = [];
   const geometryTagNames = new Set(['path', 'circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon']);
   const groupStack: string[] = [];
+  const groupStyleStack: StyleDefaults[] = [];
+  const groupClipPathStack: Array<string | null> = [];
   const groupKeyCounts = new Map<string, number>();
+  let defsDepth = 0;
+  let clipPathDepth = 0;
   let autoGroupIndex = 0;
   const uniqueGroupKey = (raw: string | null) => {
     const base = (raw ?? '').trim() || `group-${++autoGroupIndex}`;
@@ -1512,83 +1647,96 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
     groupKeyCounts.set(base, nextCount);
     return nextCount === 1 ? base : `${base}-${nextCount}`;
   };
+  const resolveFromGroups = (key: keyof StyleDefaults) => {
+    for (let i = groupStyleStack.length - 1; i >= 0; i -= 1) {
+      const v = groupStyleStack[i]?.[key];
+      if (v !== null && v !== undefined) return v;
+    }
+    return rootDefaults[key];
+  };
+  const resolveClipPathFromGroups = () => {
+    for (let i = groupClipPathStack.length - 1; i >= 0; i -= 1) {
+      const v = groupClipPathStack[i];
+      if (v) return v;
+    }
+    return null;
+  };
   for (const tag of tags) {
     const closeTagMatch = tag.match(/^<\s*\/\s*([a-z0-9:_-]+)\s*>/i);
     if (closeTagMatch) {
-      if (closeTagMatch[1].toLowerCase() === 'g' && groupStack.length) groupStack.pop();
+      const closeName = closeTagMatch[1].toLowerCase();
+      if (closeName === 'g' && groupStack.length) {
+        groupStack.pop();
+        groupStyleStack.pop();
+        groupClipPathStack.pop();
+      }
+      if (closeName === 'defs' && defsDepth > 0) defsDepth -= 1;
+      if (closeName === 'clippath' && clipPathDepth > 0) clipPathDepth -= 1;
       continue;
     }
     const openTagMatch = tag.match(/^<\s*([a-z0-9:_-]+)\b[^>]*>/i);
     if (!openTagMatch) continue;
     const tagName = openTagMatch[1].toLowerCase();
     const selfClosing = /\/\s*>$/.test(tag);
-    if (tagName === 'g') {
-      if (!selfClosing) groupStack.push(uniqueGroupKey(attr(tag, 'id')));
+    if (tagName === 'defs') {
+      if (!selfClosing) defsDepth += 1;
       continue;
     }
+    if (tagName === 'clippath') {
+      if (!selfClosing) clipPathDepth += 1;
+      continue;
+    }
+    if (tagName === 'g') {
+      if (!selfClosing) {
+        groupStack.push(uniqueGroupKey(attr(tag, 'id')));
+        groupStyleStack.push({
+          fill: attr(tag, 'fill'),
+          stroke: attr(tag, 'stroke'),
+          strokeWidth: attr(tag, 'stroke-width'),
+          strokeLinecap: attr(tag, 'stroke-linecap'),
+          strokeLinejoin: attr(tag, 'stroke-linejoin'),
+          opacity: attr(tag, 'opacity'),
+        });
+        groupClipPathStack.push(parseClipPathRef(attr(tag, 'clip-path') ?? attr(tag, 'clipPath')));
+      }
+      continue;
+    }
+    if (defsDepth > 0 || clipPathDepth > 0) continue;
     if (!geometryTagNames.has(tagName)) continue;
 
-    let points: Point[] | null = null;
-    let sourceD: string | null = null;
-    let closed = false;
-    if (tagName === 'path') {
-      const d = attr(tag, 'd');
-      if (!d) continue;
-      const parsed = parsePathD(d);
-      if (!parsed) continue;
-      points = parsed.points;
-      sourceD = d;
-      closed = parsed.closed;
-    } else if (tagName === 'circle') {
-      points = parseCirclePoints(tag);
-      if (!points) continue;
-      closed = true;
-    } else if (tagName === 'ellipse') {
-      points = parseEllipsePoints(tag);
-      if (!points) continue;
-      closed = true;
-    } else if (tagName === 'rect') {
-      points = parseRectPoints(tag);
-      if (!points) continue;
-      closed = true;
-    } else if (tagName === 'line') {
-      points = parseLinePoints(tag);
-      if (!points) continue;
-      closed = false;
-    } else if (tagName === 'polyline') {
-      points = parsePointsAttribute(tag);
-      if (!points || points.length < 2) continue;
-      closed = false;
-    } else if (tagName === 'polygon') {
-      points = parsePointsAttribute(tag);
-      if (!points || points.length < 2) continue;
-      const first = points[0].p;
-      const last = points[points.length - 1].p;
-      if (Math.hypot(first.x - last.x, first.y - last.y) < 0.001 && points.length > 2) points.pop();
-      closed = true;
-    } else {
-      continue;
-    }
+    const parsedGeometry = parseGeometryTag(tagName, tag);
+    if (!parsedGeometry) continue;
+    const points = parsedGeometry.points;
+    const sourceD = parsedGeometry.sourceD;
+    const closed = parsedGeometry.closed;
 
-    const fillAttr = attr(tag, 'fill') ?? rootDefaults.fill;
-    const strokeAttr = attr(tag, 'stroke') ?? rootDefaults.stroke;
-    const swAttr = attr(tag, 'stroke-width') ?? rootDefaults.strokeWidth;
+    const ownFillAttr = attr(tag, 'fill');
+    const ownStrokeAttr = attr(tag, 'stroke');
+    const ownSwAttr = attr(tag, 'stroke-width');
+    const ownSlcAttr = attr(tag, 'stroke-linecap');
+    const ownSljAttr = attr(tag, 'stroke-linejoin');
+    const ownOpacityAttr = attr(tag, 'opacity');
+    const fillAttr = ownFillAttr ?? resolveFromGroups('fill');
+    const strokeAttr = ownStrokeAttr ?? resolveFromGroups('stroke');
+    const swAttr = ownSwAttr ?? resolveFromGroups('strokeWidth');
     const sw = Number(swAttr ?? '1');
-    const slcAttr = attr(tag, 'stroke-linecap') ?? rootDefaults.strokeLinecap;
-    const sljAttr = attr(tag, 'stroke-linejoin') ?? rootDefaults.strokeLinejoin;
-    const opacityAttr = attr(tag, 'opacity') ?? rootDefaults.opacity;
+    const slcAttr = ownSlcAttr ?? resolveFromGroups('strokeLinecap');
+    const sljAttr = ownSljAttr ?? resolveFromGroups('strokeLinejoin');
+    const opacityAttr = ownOpacityAttr ?? resolveFromGroups('opacity');
     const opacity = clamp(Number(opacityAttr ?? '1'), 0, 1);
     const svgId = attr(tag, 'id') ?? '';
     const svgClass = attr(tag, 'class') ?? '';
+    const clipPathRef = parseClipPathRef(attr(tag, 'clip-path') ?? attr(tag, 'clipPath')) ?? resolveClipPathFromGroups();
+    const clipGeom = clipPathRef ? clipPathGeometryMap.get(clipPathRef) : null;
     const fill = fillAttr ?? 'currentColor';
     const stroke = strokeAttr ?? 'currentColor';
     const strokeLinecap = parseStrokeLinecap(slcAttr) ?? 'round';
     const strokeLinejoin = parseStrokeLinejoin(sljAttr) ?? 'round';
-    const fillExplicit = fillAttr !== null;
-    const strokeExplicit = strokeAttr !== null;
-    const strokeWidthExplicit = swAttr !== null;
-    const strokeLinecapExplicit = slcAttr !== null;
-    const strokeLinejoinExplicit = sljAttr !== null;
+    const fillExplicit = ownFillAttr !== null || fillAttr !== null;
+    const strokeExplicit = ownStrokeAttr !== null || strokeAttr !== null;
+    const strokeWidthExplicit = ownSwAttr !== null || swAttr !== null;
+    const strokeLinecapExplicit = ownSlcAttr !== null || slcAttr !== null;
+    const strokeLinejoinExplicit = ownSljAttr !== null || sljAttr !== null;
 
     shapes.push({
       id: uid(),
@@ -1612,7 +1760,12 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
       strokeWidthExplicit,
       strokeLinecapExplicit,
       strokeLinejoinExplicit,
-      opacityExplicit: opacityAttr !== null,
+      opacityExplicit: ownOpacityAttr !== null || opacityAttr !== null,
+      clipPathRef: clipPathRef ?? '',
+      clipPathPoints: clipGeom ? clonePoints(clipGeom.points) : null,
+      clipPathClosed: clipGeom?.closed ?? false,
+      clipPathSourceD: clipGeom?.sourceD ?? null,
+      clipPathMappedD: null,
     });
   }
 

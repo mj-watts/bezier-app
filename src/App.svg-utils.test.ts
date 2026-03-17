@@ -127,6 +127,19 @@ describe('SVG utils', () => {
     expect(first?.strokeWidthExplicit).toBe(true);
   });
 
+  it('parseSvg inherits fill/stroke defaults from parent groups', () => {
+    const groupedInheritedSvg = `<svg viewBox="0 0 10 10"><g fill="none" stroke="#9099f5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1 H 9" /></g></svg>`;
+    const parsed = parseSvg(groupedInheritedSvg);
+    expect(parsed).not.toBeNull();
+    const first = parsed?.shapes[0];
+    expect(first?.fill).toBe('none');
+    expect(first?.stroke).toBe('#9099f5');
+    expect(first?.strokeExplicit).toBe(true);
+    expect(first?.strokeWidthExplicit).toBe(true);
+    expect(first?.strokeLinecap).toBe('round');
+    expect(first?.strokeLinejoin).toBe('round');
+  });
+
   it('parseSvg and serializeSvg preserve round line caps and joins', () => {
     const roundedSvg = `<svg viewBox="0 0 24 24"><path d="M10 10V14" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     const parsed = parseSvg(roundedSvg);
@@ -143,6 +156,33 @@ describe('SVG utils', () => {
     expect(pathTag).toContain('stroke-linecap="round"');
     expect(pathTag).toContain('stroke-linejoin="round"');
     expect(pathTag).toContain('stroke-width="2"');
+  });
+
+  it('parseSvg and serializeSvg preserve clip-path references and defs', () => {
+    const clippedSvg = `<svg viewBox="0 0 100 100"><defs><clipPath id="clip-a"><path d="M10 10 H 90 V 90 H 10 Z" /></clipPath></defs><path d="M0 50 H 100" stroke="black" stroke-width="20" clip-path="url(#clip-a)"/></svg>`;
+    const parsed = parseSvg(clippedSvg);
+    expect(parsed).not.toBeNull();
+    const first = parsed?.shapes[0];
+    expect(first?.clipPathRef).toBe('clip-a');
+    expect(first?.clipPathPoints?.length).toBeGreaterThan(0);
+
+    if (!parsed) return;
+    const out = serializeSvg(parsed.shapes, parsed.viewBox);
+    expect(out).toContain('<defs>');
+    expect(out).toContain('<clipPath id="clip-a">');
+    expect(out).toContain('clip-path="url(#clip-a)"');
+  });
+
+  it('parseSvg keeps complex filled dot path used for i tittle', () => {
+    const dotSvg = `<svg viewBox="0 0 434.73 239.89"><path id="dot" fill="#9099f5" d="M285.9,144.7c-2.7,0.1-4.8-0.5-6.6-1.8c-1.7-1.3-2.8-3.1-3-5.4c-0.2-1.9,0.3-3.6,1.4-5.1 c1.1-1.5,2.5-2.5,4.3-2.8c1.9-0.4,3.6-0.2,5.1,0.8c1.5,1,2.5,2.4,3,4.2c0.2,0.5,0.4,1,0.5,1.4c0.1,0.4,0.3,0.9,0.5,1.3 c0.8,2,0.7,2.9-0.3,4.4C289.8,143.2,288.2,144.8,285.9,144.7z"/></svg>`;
+    const parsed = parseSvg(dotSvg);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.shapes).toHaveLength(1);
+    const first = parsed?.shapes[0];
+    expect(first?.svgId).toBe('dot');
+    expect(first?.fill).toBe('#9099f5');
+    expect(first?.closed).toBe(true);
+    expect(first?.points.length).toBeGreaterThan(2);
   });
 
   it('parseSvg preserves closing curve handles when Z closes on the first anchor', () => {
