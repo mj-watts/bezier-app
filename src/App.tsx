@@ -560,7 +560,7 @@ const App = () => {
       if (target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
       const key = e.key.toLowerCase();
-      if (key === 'v') {
+      if (key === 'v' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         setTool('select');
         setPenHover(null);
