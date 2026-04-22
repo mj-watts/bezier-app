@@ -857,11 +857,19 @@ input[type='checkbox'] {
   stroke: rgba(255, 154, 0, 0.95);
   stroke-width: 1;
   stroke-dasharray: 5 4;
+  mix-blend-mode: difference;
 }
 
-.viewbox-label {
-  fill: #ffd58e;
-  font-weight: 700;
+.viewbox-top-layer {
+  isolation: isolate;
+}
+
+.viewbox-size-tag-box {
+  mix-blend-mode: normal;
+}
+
+.viewbox-size-tag-text {
+  mix-blend-mode: normal;
 }
 
 .anchor {

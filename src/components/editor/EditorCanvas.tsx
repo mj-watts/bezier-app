@@ -227,29 +227,6 @@ const EditorCanvas = ({
                 setMarquee(null);
               }}
             />
-            {showViewBox ? (
-              <>
-                <rect
-                  x={editorDocViewBox.minX}
-                  y={editorDocViewBox.minY}
-                  width={editorDocViewBox.vbW}
-                  height={editorDocViewBox.vbH}
-                  className="viewbox-overlay"
-                  vectorEffect="non-scaling-stroke"
-                  pointerEvents="none"
-                />
-                <text
-                  x={editorDocViewBox.minX + 8 / zoom}
-                  y={editorDocViewBox.minY + 16 / zoom}
-                  className="viewbox-label"
-                  style={{ fontSize: `${11 / zoom}px` }}
-                  pointerEvents="none"
-                >
-                  {`viewBox ${docViewBox.minX.toFixed(2)} ${docViewBox.minY.toFixed(2)} ${docViewBox.vbW.toFixed(2)} ${docViewBox.vbH.toFixed(2)}`}
-                </text>
-              </>
-            ) : null}
-
             {shapes.map((shape, i) => (
               <path
                 key={shape.id}
@@ -395,6 +372,51 @@ const EditorCanvas = ({
                 pointerEvents="none"
               />
             ) : null}
+
+            {showViewBox
+              ? (() => {
+                  const sizeLabel = `${docViewBox.vbW.toFixed(1)} x ${docViewBox.vbH.toFixed(1)}`;
+                  const sizeTagScale = 0.6;
+                  const labelFontSize = (9 * sizeTagScale) / zoom;
+                  const labelWidth = ((sizeLabel.length * 5.5 + 8) * sizeTagScale) / zoom;
+                  const labelHeight = (14 * sizeTagScale) / zoom;
+                  const labelCx = editorDocViewBox.minX + editorDocViewBox.vbW / 2;
+                  const labelCy = editorDocViewBox.minY + editorDocViewBox.vbH + (5 * sizeTagScale) / zoom + labelHeight / 2;
+                  return (
+                    <g className="viewbox-top-layer" pointerEvents="none">
+                      <rect
+                        x={editorDocViewBox.minX}
+                        y={editorDocViewBox.minY}
+                        width={editorDocViewBox.vbW}
+                        height={editorDocViewBox.vbH}
+                        className="viewbox-overlay"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <g className="scale-size-tag">
+                        <rect
+                          x={labelCx - labelWidth / 2}
+                          y={labelCy - labelHeight / 2}
+                          width={labelWidth}
+                          height={labelHeight}
+                          rx={(3 * sizeTagScale) / zoom}
+                          ry={(3 * sizeTagScale) / zoom}
+                          className="scale-size-tag-box viewbox-size-tag-box"
+                        />
+                        <text
+                          x={labelCx}
+                          y={labelCy}
+                          className="scale-size-tag-text viewbox-size-tag-text"
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          style={{ fontSize: `${labelFontSize}px` }}
+                        >
+                          {sizeLabel}
+                        </text>
+                      </g>
+                    </g>
+                  );
+                })()
+              : null}
           </svg>
     </>
   );
