@@ -124,6 +124,7 @@ const App = () => {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [showViewBox, setShowViewBox] = useState(false);
   const [currentColorValue, setCurrentColorValue] = useState('#ffffff');
+  const [copiedPathsBuffer, setCopiedPathsBuffer] = useState<PathShape[] | null>(null);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const codeOverlayRef = useRef<HTMLPreElement | null>(null);
   const codeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -140,6 +141,7 @@ const App = () => {
   const lucideMenuRef = useRef<HTMLDivElement | null>(null);
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
   const currentColorMenuRef = useRef<HTMLDivElement | null>(null);
+  const pasteOffsetStepRef = useRef(1);
 
   const activePath = shapes[selectedPath] ?? DEFAULT_DOCUMENT.shapes[0];
   const transformTargetIndices = useMemo(() => {
@@ -257,6 +259,109 @@ const App = () => {
 
   const sortUniquePathIndices = (indices: number[]) =>
     [...new Set(indices)].filter((idx) => idx >= 0 && idx < shapes.length).sort((a, b) => a - b);
+
+  const uid = () => Math.random().toString(36).slice(2, 9);
+
+  const cloneShapeWithFreshIds = (shape: PathShape): PathShape => ({
+    ...shape,
+    id: uid(),
+    groupChain: [...shape.groupChain],
+    groupClassChain: [...(shape.groupClassChain ?? [])],
+    points: shape.points.map((pt) => ({
+      ...pt,
+      id: uid(),
+      p: { ...pt.p },
+      in: pt.in ? { ...pt.in } : null,
+      out: pt.out ? { ...pt.out } : null,
+    })),
+    clipPathPoints: shape.clipPathPoints
+      ? shape.clipPathPoints.map((pt) => ({
+          ...pt,
+          id: uid(),
+          p: { ...pt.p },
+          in: pt.in ? { ...pt.in } : null,
+          out: pt.out ? { ...pt.out } : null,
+        }))
+      : null,
+  });
+
+  const copySelectedPathsToBuffer = () => {
+    if (!pathSelected || !shapes.length) return false;
+    const indices = sortUniquePathIndices(selectedPaths.length ? selectedPaths : [selectedPath]);
+    if (!indices.length) return false;
+    const copied = indices.map((i) => cloneShapeWithFreshIds(shapes[i])).filter((shape): shape is PathShape => !!shape);
+    if (!copied.length) return false;
+    setCopiedPathsBuffer(copied);
+    pasteOffsetStepRef.current = 1;
+    return true;
+  };
+
+  const pasteCopiedPathsFromBuffer = () => {
+    if (!copiedPathsBuffer?.length) return false;
+    const offset = 24 * pasteOffsetStepRef.current;
+    const existingGroupIds = new Set(shapes.flatMap((shape) => shape.groupChain ?? []));
+    const copiedGroupIds = [...new Set(copiedPathsBuffer.flatMap((shape) => shape.groupChain ?? []))];
+    const groupIdMap = new Map<string, string>();
+    for (const sourceId of copiedGroupIds) {
+      let next = `${sourceId}-copy`;
+      let n = 2;
+      while (existingGroupIds.has(next) || groupIdMap.has(next)) {
+        next = `${sourceId}-copy-${n}`;
+        n += 1;
+      }
+      groupIdMap.set(sourceId, next);
+      existingGroupIds.add(next);
+    }
+
+    const pasted = copiedPathsBuffer.map((shape) => {
+      const cloned = cloneShapeWithFreshIds(shape);
+      return {
+        ...cloned,
+        groupChain: cloned.groupChain.map((id) => groupIdMap.get(id) ?? id),
+        geometryDirty: true,
+        points: cloned.points.map((pt) => ({
+          ...pt,
+          p: { x: pt.p.x + offset, y: pt.p.y + offset },
+          in: pt.in ? { x: pt.in.x + offset, y: pt.in.y + offset } : null,
+          out: pt.out ? { x: pt.out.x + offset, y: pt.out.y + offset } : null,
+        })),
+        clipPathPoints: cloned.clipPathPoints
+          ? cloned.clipPathPoints.map((pt) => ({
+              ...pt,
+              p: { x: pt.p.x + offset, y: pt.p.y + offset },
+              in: pt.in ? { x: pt.in.x + offset, y: pt.in.y + offset } : null,
+              out: pt.out ? { x: pt.out.x + offset, y: pt.out.y + offset } : null,
+            }))
+          : null,
+      };
+    });
+
+    if (!pasted.length) return false;
+    pushUndo();
+    const startIndex = shapes.length;
+    setShapes((curr) => [...curr, ...pasted]);
+    const inserted = pasted.map((_, i) => startIndex + i);
+    const first = inserted[0] ?? 0;
+    const all = pasted[0]?.points.map((_, i) => i) ?? [0];
+    setPathSelected(true);
+    setSelectedPath(first);
+    setSelectedPaths(inserted);
+    setSelectedPoint(all[0] ?? 0);
+    setSelectedPoints(all.length ? all : [0]);
+    setTool('select');
+    setPenHover(null);
+    setTransformAllPaths(false);
+    enterTransformMode();
+    pasteOffsetStepRef.current += 1;
+    return true;
+  };
+
+  const cutSelectedPathsToBuffer = () => {
+    if (!copySelectedPathsToBuffer()) return false;
+    deletePath();
+    setConfirmDeletePath(false);
+    return true;
+  };
 
   const sameIndexSet = (a: number[], b: number[]) => {
     if (a.length !== b.length) return false;
@@ -594,6 +699,15 @@ const App = () => {
         setSelectedPoints(all.length ? all : [0]);
         enterTransformMode();
       }
+      if ((e.metaKey || e.ctrlKey) && key === 'c') {
+        if (copySelectedPathsToBuffer()) e.preventDefault();
+      }
+      if ((e.metaKey || e.ctrlKey) && key === 'x') {
+        if (cutSelectedPathsToBuffer()) e.preventDefault();
+      }
+      if ((e.metaKey || e.ctrlKey) && key === 'v') {
+        if (pasteCopiedPathsFromBuffer()) e.preventDefault();
+      }
       if ((e.metaKey || e.ctrlKey) && key === 'g') {
         e.preventDefault();
         if (e.shiftKey) ungroupSelection();
@@ -624,7 +738,7 @@ const App = () => {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [shapes, pathSelected, selectedPath, selectedPaths]);
+  }, [shapes, pathSelected, selectedPath, selectedPaths, copiedPathsBuffer]);
 
   const updatePath = (pathIndex: number, mutator: (path: PathShape) => PathShape) => {
     setShapes((curr) => curr.map((path, i) => (i === pathIndex ? mutator(path) : path)));
@@ -1206,19 +1320,25 @@ const App = () => {
   useEffect(() => {
     const onWindowPaste = (e: ClipboardEvent) => {
       const target = e.target as HTMLElement | null;
+      const isCodeTextareaTarget = target === codeTextareaRef.current;
       if (target) {
         const tag = target.tagName;
         const isEditable = target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-        if (isEditable && target !== codeTextareaRef.current) return;
+        if (isEditable && !isCodeTextareaTarget) return;
       }
       const pasted = extractSvgFromClipboard(e.clipboardData);
-      if (!pasted) return;
-      if (!importPastedSvg(pasted)) return;
-      e.preventDefault();
+      if (pasted) {
+        if (!importPastedSvg(pasted)) return;
+        e.preventDefault();
+        return;
+      }
+      if (!isCodeTextareaTarget && pasteCopiedPathsFromBuffer()) {
+        e.preventDefault();
+      }
     };
     document.addEventListener('paste', onWindowPaste, true);
     return () => document.removeEventListener('paste', onWindowPaste, true);
-  }, [importPastedSvg]);
+  }, [importPastedSvg, copiedPathsBuffer, shapes]);
 
   const updateActiveStyle = (patch: Partial<Pick<PathShape, 'fill' | 'stroke' | 'strokeWidth' | 'opacity' | 'closed'>>) => {
     pushUndo();
