@@ -16,6 +16,7 @@ type PathShape = {
   id: string;
   name: string;
   groupChain: string[];
+  groupClassChain: string[];
   points: Point[];
   uiRotation: number;
   svgId: string;
@@ -334,6 +335,7 @@ const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: num
     id: uid(),
     name,
     groupChain: [],
+    groupClassChain: [],
     points,
     uiRotation: 0,
     svgId: '',
@@ -413,6 +415,7 @@ const cloneShapes = (shapes: PathShape[]) =>
   shapes.map((shape) => ({
     ...shape,
     groupChain: [...shape.groupChain],
+    groupClassChain: [...(shape.groupClassChain ?? [])],
     points: clonePoints(shape.points),
     clipPathPoints: shape.clipPathPoints ? clonePoints(shape.clipPathPoints) : null,
   }));
@@ -888,21 +891,33 @@ const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
       `    </clipPath>`,
     );
   }
-  const openGroups: string[] = [];
+  const openGroups: Array<{ id: string; className: string }> = [];
   for (let i = 0; i < shapes.length; i += 1) {
     const shape = shapes[i];
     const exportShape = exportShapes[i];
     if (!shape || !exportShape) continue;
     const chain = shape.groupChain ?? [];
+    const classChain = shape.groupClassChain ?? [];
     let common = 0;
-    while (common < openGroups.length && common < chain.length && openGroups[common] === chain[common]) common += 1;
+    while (
+      common < openGroups.length &&
+      common < chain.length &&
+      openGroups[common].id === chain[common] &&
+      openGroups[common].className === (classChain[common] ?? '')
+    ) {
+      common += 1;
+    }
     for (let j = openGroups.length - 1; j >= common; j -= 1) {
       lines.push(`${'  '.repeat(j + 1)}</g>`);
       openGroups.pop();
     }
     for (let j = common; j < chain.length; j += 1) {
-      lines.push(`${'  '.repeat(j + 1)}<g id="${esc(chain[j])}">`);
-      openGroups.push(chain[j]);
+      const id = chain[j] ?? '';
+      const className = classChain[j] ?? '';
+      const groupAttrs = [`id="${esc(id)}"`];
+      if (className.trim()) groupAttrs.push(`class="${esc(className.trim())}"`);
+      lines.push(`${'  '.repeat(j + 1)}<g ${groupAttrs.join(' ')}>`);
+      openGroups.push({ id, className });
     }
     lines.push(renderShape(shape, exportShape, '  '.repeat(chain.length + 1)));
   }
@@ -1635,6 +1650,7 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
   const shapes: PathShape[] = [];
   const geometryTagNames = new Set(['path', 'circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon']);
   const groupStack: string[] = [];
+  const groupClassStack: string[] = [];
   const groupStyleStack: StyleDefaults[] = [];
   const groupClipPathStack: Array<string | null> = [];
   const groupKeyCounts = new Map<string, number>();
@@ -1667,6 +1683,7 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
       const closeName = closeTagMatch[1].toLowerCase();
       if (closeName === 'g' && groupStack.length) {
         groupStack.pop();
+        groupClassStack.pop();
         groupStyleStack.pop();
         groupClipPathStack.pop();
       }
@@ -1689,6 +1706,7 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
     if (tagName === 'g') {
       if (!selfClosing) {
         groupStack.push(uniqueGroupKey(attr(tag, 'id')));
+        groupClassStack.push((attr(tag, 'class') ?? '').trim());
         groupStyleStack.push({
           fill: attr(tag, 'fill'),
           stroke: attr(tag, 'stroke'),
@@ -1742,6 +1760,7 @@ const parseSvg = (input: string): { shapes: PathShape[]; viewBox: ViewBox } | nu
       id: uid(),
       name: `Path ${shapes.length + 1}`,
       groupChain: groupStack.slice(0, MAX_GROUP_NESTING),
+      groupClassChain: groupClassStack.slice(0, MAX_GROUP_NESTING),
       points,
       uiRotation: 0,
       svgId,

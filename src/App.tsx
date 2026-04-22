@@ -74,6 +74,7 @@ import { loadLucideIconSvg } from './lib/lucide-icons';
 import {
   clampOriginForZoom,
   computeZoomFocusFromSelection,
+  createGroupMetaMenuState,
   createCurrentColorMenuState,
   createLucideMenuState,
   createPathMetaMenuState,
@@ -364,9 +365,14 @@ const App = () => {
       curr.map((shape, i) => {
         if (!memberSet.has(i)) return shape;
         const currentChain = shape.groupChain ?? [];
+        const currentClassChain = shape.groupClassChain ?? [];
         if (!hasChainPrefix(currentChain, targetPrefix)) return shape;
         if (removeAt >= currentChain.length) return shape;
-        return { ...shape, groupChain: [...currentChain.slice(0, removeAt), ...currentChain.slice(removeAt + 1)] };
+        return {
+          ...shape,
+          groupChain: [...currentChain.slice(0, removeAt), ...currentChain.slice(removeAt + 1)],
+          groupClassChain: [...currentClassChain.slice(0, removeAt), ...currentClassChain.slice(removeAt + 1)],
+        };
       }),
     );
 
@@ -382,7 +388,13 @@ const App = () => {
     return true;
   };
 
-  const movePath = (fromPathIndex: number, toPathIndex: number, placement: 'before' | 'after', nextGroupChain: string[]) => {
+  const movePath = (
+    fromPathIndex: number,
+    toPathIndex: number,
+    placement: 'before' | 'after',
+    nextGroupChain: string[],
+    nextGroupClassChain: string[],
+  ) => {
     if (fromPathIndex < 0 || toPathIndex < 0 || fromPathIndex >= shapes.length || toPathIndex >= shapes.length) return;
 
     const original = shapes.map((_, i) => i);
@@ -401,7 +413,9 @@ const App = () => {
 
     pushUndo();
     setShapes((curr) => {
-      const nextCurr = curr.map((shape, i) => (i === fromPathIndex ? { ...shape, groupChain: [...nextGroupChain] } : shape));
+      const nextCurr = curr.map((shape, i) =>
+        i === fromPathIndex ? { ...shape, groupChain: [...nextGroupChain], groupClassChain: [...nextGroupClassChain] } : shape,
+      );
       return without.map((oldIndex) => nextCurr[oldIndex]).filter((shape): shape is PathShape => !!shape);
     });
     setSelectedPath((prev) => oldToNew.get(prev) ?? prev);
@@ -412,29 +426,31 @@ const App = () => {
 
   const reorderPaths = (fromPathIndex: number, toPathIndex: number, placement: 'before' | 'after') => {
     const targetParent = [...(shapes[toPathIndex]?.groupChain ?? [])];
-    movePath(fromPathIndex, toPathIndex, placement, targetParent);
+    const targetParentClass = [...(shapes[toPathIndex]?.groupClassChain ?? [])];
+    movePath(fromPathIndex, toPathIndex, placement, targetParent, targetParentClass);
   };
 
   const dropPathOnGroup = (fromPathIndex: number, targetPathIndex: number, groupDepth: number) => {
     const chain = shapes[targetPathIndex]?.groupChain ?? [];
     if (groupDepth < 0 || groupDepth >= chain.length) return;
     const targetPrefix = chain.slice(0, groupDepth + 1);
+    const targetClassPrefix = (shapes[targetPathIndex]?.groupClassChain ?? []).slice(0, groupDepth + 1);
     const groupMembers = shapes
       .map((shape, i) => (hasChainPrefix(shape.groupChain ?? [], targetPrefix) ? i : -1))
       .filter((i) => i >= 0 && i !== fromPathIndex);
     const anchor = groupMembers.length ? groupMembers[groupMembers.length - 1] : targetPathIndex;
-    movePath(fromPathIndex, anchor, 'after', targetPrefix);
+    movePath(fromPathIndex, anchor, 'after', targetPrefix, targetClassPrefix);
   };
 
   const dropPathOnUngrouped = (fromPathIndex: number) => {
     if (fromPathIndex < 0 || fromPathIndex >= shapes.length) return;
     const ungrouped = shapes.map((shape, i) => (!(shape.groupChain?.length ?? 0) ? i : -1)).filter((i) => i >= 0 && i !== fromPathIndex);
     if (ungrouped.length) {
-      movePath(fromPathIndex, ungrouped[0], 'before', []);
+      movePath(fromPathIndex, ungrouped[0], 'before', [], []);
       return;
     }
     const anchor = clamp(fromPathIndex, 0, shapes.length - 1);
-    movePath(fromPathIndex, anchor, 'after', []);
+    movePath(fromPathIndex, anchor, 'after', [], []);
   };
 
   const groupSelectedPaths = () => {
@@ -487,7 +503,12 @@ const App = () => {
       const mapped = curr.map((shape, i) => {
         if (!selectedSet.has(i)) return shape;
         const chain = shape.groupChain ?? [];
-        return { ...shape, groupChain: [...chain.slice(0, insertAt), groupId, ...chain.slice(insertAt)] };
+        const classChain = shape.groupClassChain ?? [];
+        return {
+          ...shape,
+          groupChain: [...chain.slice(0, insertAt), groupId, ...chain.slice(insertAt)],
+          groupClassChain: [...classChain.slice(0, insertAt), '', ...classChain.slice(insertAt)],
+        };
       });
 
       // Make grouped siblings contiguous so serializer emits a single <g id="..."> block.
@@ -1444,14 +1465,8 @@ const App = () => {
 
   const openGroupMetaMenu = (pathIndex: number, depth: number, rect: DOMRect) => {
     const path = shapes[pathIndex];
-    const idValue = path?.groupChain?.[depth];
-    if (!path || !idValue) return;
-    const menuWidth = 260;
-    const menuHeight = 154;
-    const margin = 8;
-    const x = Math.min(rect.left, window.innerWidth - menuWidth - margin);
-    const y = Math.min(rect.bottom + 6, window.innerHeight - menuHeight - margin);
-    setGroupMetaMenu({ pathIndex, depth, x, y, idValue });
+    if (!path || !path.groupChain?.[depth]) return;
+    setGroupMetaMenu(createGroupMetaMenuState(pathIndex, depth, path, rect, { width: window.innerWidth, height: window.innerHeight }));
     setPathMetaMenu(null);
     setShapeMenu(null);
     setLucideMenu(null);
@@ -1463,9 +1478,12 @@ const App = () => {
     if (!groupMetaMenu) return;
     const sourceShape = shapes[groupMetaMenu.pathIndex];
     const chain = sourceShape?.groupChain ?? [];
+    const classChain = sourceShape?.groupClassChain ?? [];
     const oldId = chain[groupMetaMenu.depth];
+    const oldClass = classChain[groupMetaMenu.depth] ?? '';
     const newId = groupMetaMenu.idValue.trim();
-    if (!oldId || !newId || oldId === newId) {
+    const newClass = groupMetaMenu.classValue.trim();
+    if (!oldId || !newId || (oldId === newId && oldClass === newClass)) {
       setGroupMetaMenu(null);
       return;
     }
@@ -1474,12 +1492,16 @@ const App = () => {
     setShapes((curr) =>
       curr.map((shape) => {
         const nextChain = shape.groupChain ?? [];
+        const nextClassChain = shape.groupClassChain ?? [];
         if ((nextChain.length ?? 0) <= groupMetaMenu.depth) return shape;
         if (!hasChainPrefix(nextChain, prefix)) return shape;
         if (nextChain[groupMetaMenu.depth] !== oldId) return shape;
+        if ((nextClassChain[groupMetaMenu.depth] ?? '') !== oldClass) return shape;
         const replaced = [...nextChain];
+        const replacedClasses = [...nextClassChain];
         replaced[groupMetaMenu.depth] = newId;
-        return { ...shape, groupChain: replaced };
+        replacedClasses[groupMetaMenu.depth] = newClass;
+        return { ...shape, groupChain: replaced, groupClassChain: replacedClasses };
       }),
     );
     setGroupMetaMenu(null);
@@ -1897,6 +1919,7 @@ const App = () => {
         onClose={() => setGroupMetaMenu(null)}
         onApply={applyGroupMetaMenu}
         onIdValueChange={(next) => setGroupMetaMenu((m) => (m ? { ...m, idValue: next } : m))}
+        onClassValueChange={(next) => setGroupMetaMenu((m) => (m ? { ...m, classValue: next } : m))}
       />
       <ShapeMenu menu={shapeMenu} menuRef={shapeMenuRef} onAddPreset={addPresetPath} />
       <LucideIconMenu menu={lucideMenu} menuRef={lucideMenuRef} onClose={() => setLucideMenu(null)} onSelectIcon={addLucideIcon} />

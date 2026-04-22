@@ -18,6 +18,7 @@ export type GroupMetaMenuState = {
   x: number;
   y: number;
   idValue: string;
+  classValue: string;
 };
 
 export type StyleMenuState = { kind: StylePanel; x: number; y: number };

@@ -100,6 +100,24 @@ describe('SVG utils', () => {
     expect(parsed?.shapes[1]?.groupChain).toEqual(['outer', 'inner']);
   });
 
+  it('parseSvg and serializeSvg preserve group classes', () => {
+    const groupedSvg = `<svg viewBox="0 0 10 10">
+      <g id="outer" class="frame">
+        <g id="inner" class="ink detail">
+          <path d="M1 1 L2 2" />
+        </g>
+      </g>
+    </svg>`;
+    const parsed = parseSvg(groupedSvg);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.shapes[0]?.groupChain).toEqual(['outer', 'inner']);
+    expect(parsed?.shapes[0]?.groupClassChain).toEqual(['frame', 'ink detail']);
+    if (!parsed) return;
+    const out = serializeSvg(parsed.shapes, parsed.viewBox);
+    expect(out).toContain('<g id="outer" class="frame">');
+    expect(out).toContain('<g id="inner" class="ink detail">');
+  });
+
   it('parseSvg limits group ancestry depth to 3 levels', () => {
     const deepGroupedSvg = `<svg viewBox="0 0 10 10">
       <g id="g1"><g id="g2"><g id="g3"><g id="g4"><path d="M1 1 L2 2" /></g></g></g></g>

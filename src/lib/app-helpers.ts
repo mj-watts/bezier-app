@@ -12,6 +12,7 @@ import {
 import {
   type CurrentColorMenuState,
   type CursorZoomFocus,
+  type GroupMetaMenuState,
   type LucideMenuState,
   type PathMetaMenuState,
   type ShapeMenuState,
@@ -102,6 +103,21 @@ export const createPathMetaMenuState = (
   y: clampMenuY(rect.bottom + 6, 168, viewport.height),
   idValue: path.svgId,
   classValue: path.svgClass,
+});
+
+export const createGroupMetaMenuState = (
+  pathIndex: number,
+  depth: number,
+  path: Pick<PathShape, 'groupChain' | 'groupClassChain'>,
+  rect: DOMRect,
+  viewport: ViewportSize,
+): GroupMetaMenuState => ({
+  pathIndex,
+  depth,
+  x: clampMenuX(rect.left, 260, viewport.width),
+  y: clampMenuY(rect.bottom + 6, 168, viewport.height),
+  idValue: path.groupChain?.[depth] ?? '',
+  classValue: path.groupClassChain?.[depth] ?? '',
 });
 
 export const createStyleMenuState = (kind: StylePanel, rect: DOMRect, viewport: ViewportSize): StyleMenuState => ({

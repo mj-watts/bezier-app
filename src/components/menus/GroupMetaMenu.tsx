@@ -7,9 +7,10 @@ type Props = {
   onClose: () => void;
   onApply: () => void;
   onIdValueChange: (next: string) => void;
+  onClassValueChange: (next: string) => void;
 };
 
-const GroupMetaMenu = ({ menu, menuRef, onClose, onApply, onIdValueChange }: Props) => {
+const GroupMetaMenu = ({ menu, menuRef, onClose, onApply, onIdValueChange, onClassValueChange }: Props) => {
   if (!menu) return null;
 
   return (
@@ -33,6 +34,10 @@ const GroupMetaMenu = ({ menu, menuRef, onClose, onApply, onIdValueChange }: Pro
       <label>
         ID
         <input autoFocus value={menu.idValue} onChange={(e) => onIdValueChange(e.target.value)} placeholder="group id" />
+      </label>
+      <label>
+        Class
+        <input value={menu.classValue} onChange={(e) => onClassValueChange(e.target.value)} placeholder="optional" />
       </label>
       <div className="path-meta-actions">
         <button className="control-btn" type="button" onClick={onClose}>
