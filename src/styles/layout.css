@@ -341,6 +341,13 @@ textarea {
   overflow: hidden;
 }
 
+.canvas-region {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+}
+
 .paths-pane {
   min-height: 0;
   min-width: 0;
@@ -826,6 +833,124 @@ input[type='checkbox'] {
   background: #12161d;
   color: #ffffff;
   display: block;
+}
+
+.shortcuts-help-panel {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  height: 20%;
+  z-index: 30;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #171d26 0%, #131922 100%);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shortcuts-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #293240;
+  background: #1d2530;
+}
+
+.shortcuts-help-header h2 {
+  margin: 0;
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+}
+
+.shortcuts-help-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px 14px;
+}
+
+.shortcuts-help-section {
+  border: 1px solid #273244;
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(20, 27, 37, 0.82);
+}
+
+.shortcuts-help-section h3 {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f2de9c;
+}
+
+.shortcuts-help-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.shortcuts-help-row:last-child {
+  margin-bottom: 0;
+}
+
+.shortcuts-help-action {
+  color: #cbd7e4;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.shortcuts-help-combos {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.shortcuts-help-combo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcuts-help-token-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcuts-help-plus,
+.shortcuts-help-or {
+  color: #8fa0b4;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.shortcuts-help-panel kbd {
+  display: inline-block;
+  min-height: 20px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  border: 1px solid #3b495f;
+  background: linear-gradient(180deg, #303b4d 0%, #232d3d 100%);
+  color: #eef4fb;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
 }
 
 .editor:focus,

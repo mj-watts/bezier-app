@@ -1,5 +1,6 @@
 import {
   BadgeInfo,
+  CircleHelp,
   Expand,
   Merge,
   MousePointer2,
@@ -32,6 +33,8 @@ type Props = {
   onMerge: () => void;
   canMerge: boolean;
   pathSelected: boolean;
+  helpOpen: boolean;
+  onToggleHelp: () => void;
 };
 
 const ToolDock = ({
@@ -50,6 +53,8 @@ const ToolDock = ({
   onMerge,
   canMerge,
   pathSelected,
+  helpOpen,
+  onToggleHelp,
 }: Props) => {
   return (
     <aside className="tool-dock">
@@ -221,6 +226,18 @@ const ToolDock = ({
             <Merge />
           </button>
         </span>
+      </Tooltip>
+      <div className="tool-divider" />
+      <Tooltip
+        title="Keyboard Shortcuts"
+        placement="right"
+        enterDelay={0}
+        enterNextDelay={0}
+        leaveDelay={0}
+      >
+        <button className={helpOpen ? "tool active" : "tool"} onClick={onToggleHelp}>
+          <CircleHelp />
+        </button>
       </Tooltip>
     </aside>
   );

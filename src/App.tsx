@@ -4,6 +4,7 @@ import CodePane from './components/CodePane';
 import ControlsBar from './components/ControlsBar';
 import EditorCanvas from './components/editor/EditorCanvas';
 import PathPane, { type PathPaneRow } from './components/PathPane';
+import ShortcutsHelpPanel from './components/ShortcutsHelpPanel';
 import ToolDock from './components/ToolDock';
 import TopBar from './components/TopBar';
 import CurrentColorMenu from './components/menus/CurrentColorMenu';
@@ -122,6 +123,7 @@ const App = () => {
   const [currentColorMenu, setCurrentColorMenu] = useState<CurrentColorMenuState | null>(null);
   const [confirmDeletePath, setConfirmDeletePath] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const [showViewBox, setShowViewBox] = useState(false);
   const [currentColorValue, setCurrentColorValue] = useState('#ffffff');
   const [copiedPathsBuffer, setCopiedPathsBuffer] = useState<PathShape[] | null>(null);
@@ -1841,6 +1843,8 @@ const App = () => {
           onMerge={mergeSelectedAnchors}
           canMerge={pathSelected && selectedPoints.length >= 2}
           pathSelected={pathSelected}
+          helpOpen={shortcutsHelpOpen}
+          onToggleHelp={() => setShortcutsHelpOpen((open) => !open)}
         />
 
         <section className="left-pane">
@@ -1899,54 +1903,57 @@ const App = () => {
             }
           />
 
-          <EditorCanvas
-            editorSvgRef={editorSvgRef}
-            spaceDown={spaceDown}
-            tool={tool}
-            viewOrigin={viewOrigin}
-            zoom={zoom}
-            currentColorValue={currentColorValue}
-            setDrag={setDrag}
-            onCanvasMove={onCanvasMove}
-            setCursorZoomFocus={setCursorZoomFocus}
-            setPenHover={setPenHover}
-            onCanvasClick={onCanvasClick}
-            clearSelection={clearSelection}
-            toLocal={toLocal}
-            marquee={marquee}
-            setMarquee={setMarquee}
-            shapes={shapes}
-            allPointIndicesForPath={allPointIndicesForPath}
-            setPathSelected={setPathSelected}
-            setSelectedPaths={setSelectedPaths}
-            setSelectedPath={setSelectedPath}
-            setSelectedPoint={setSelectedPoint}
-            setSelectedPoints={setSelectedPoints}
-            enterTransformMode={enterTransformMode}
-            onPathDoubleClick={(pathIndex) => {
-              selectNextGroupForPath(pathIndex);
-            }}
-            showViewBox={showViewBox}
-            editorDocViewBox={editorDocViewBox}
-            docViewBox={docViewBox}
-            pathDs={pathDs}
-            pathSelected={pathSelected}
-            selectedPaths={selectedPaths}
-            activePath={activePath}
-            selectedPoints={selectedPoints}
-            selectedPoint={selectedPoint}
-            penHover={penHover}
-            pushUndo={pushUndo}
-            selectedPath={selectedPath}
-            transformFrame={transformFrame}
-            transformAllPaths={transformAllPaths}
-            transformTargetIndices={transformTargetIndices}
-            isInsideTransformFrame={isInsideTransformFrame}
-            isOverSelectedStroke={isOverSelectedStroke}
-            isOverSelectedFill={isOverSelectedFill}
-            startMoveDrag={startMoveDrag}
-            drag={drag}
-          />
+          <div className="canvas-region">
+            <EditorCanvas
+              editorSvgRef={editorSvgRef}
+              spaceDown={spaceDown}
+              tool={tool}
+              viewOrigin={viewOrigin}
+              zoom={zoom}
+              currentColorValue={currentColorValue}
+              setDrag={setDrag}
+              onCanvasMove={onCanvasMove}
+              setCursorZoomFocus={setCursorZoomFocus}
+              setPenHover={setPenHover}
+              onCanvasClick={onCanvasClick}
+              clearSelection={clearSelection}
+              toLocal={toLocal}
+              marquee={marquee}
+              setMarquee={setMarquee}
+              shapes={shapes}
+              allPointIndicesForPath={allPointIndicesForPath}
+              setPathSelected={setPathSelected}
+              setSelectedPaths={setSelectedPaths}
+              setSelectedPath={setSelectedPath}
+              setSelectedPoint={setSelectedPoint}
+              setSelectedPoints={setSelectedPoints}
+              enterTransformMode={enterTransformMode}
+              onPathDoubleClick={(pathIndex) => {
+                selectNextGroupForPath(pathIndex);
+              }}
+              showViewBox={showViewBox}
+              editorDocViewBox={editorDocViewBox}
+              docViewBox={docViewBox}
+              pathDs={pathDs}
+              pathSelected={pathSelected}
+              selectedPaths={selectedPaths}
+              activePath={activePath}
+              selectedPoints={selectedPoints}
+              selectedPoint={selectedPoint}
+              penHover={penHover}
+              pushUndo={pushUndo}
+              selectedPath={selectedPath}
+              transformFrame={transformFrame}
+              transformAllPaths={transformAllPaths}
+              transformTargetIndices={transformTargetIndices}
+              isInsideTransformFrame={isInsideTransformFrame}
+              isOverSelectedStroke={isOverSelectedStroke}
+              isOverSelectedFill={isOverSelectedFill}
+              startMoveDrag={startMoveDrag}
+              drag={drag}
+            />
+            <ShortcutsHelpPanel open={shortcutsHelpOpen} onClose={() => setShortcutsHelpOpen(false)} />
+          </div>
         </section>
 
         <CodePane
