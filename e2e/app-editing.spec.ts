@@ -1,5 +1,23 @@
 import { expect, test } from '@playwright/test';
 
+test('clear leaves an empty document and supports undo and redo', async ({ page }) => {
+  await page.goto('/');
+  const code = page.locator('#live-svg-code');
+  const original = await code.inputValue();
+  expect(original).toMatch(/<path\b/);
+
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm clear', exact: true }).click();
+  await expect(code).not.toHaveValue(/<(path|rect|circle|ellipse|line|polyline|polygon)\b/);
+  const empty = await code.inputValue();
+  expect(empty).toContain('<svg');
+
+  await page.getByRole('button', { name: 'Undo (Cmd/Ctrl+Z)', exact: true }).click();
+  await expect(code).toHaveValue(original);
+  await page.getByRole('button', { name: 'Redo (Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y)', exact: true }).click();
+  await expect(code).toHaveValue(empty);
+});
+
 test('core editing controls update UI and code', async ({ page }) => {
   await page.goto('/');
 
