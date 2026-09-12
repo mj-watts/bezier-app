@@ -100,7 +100,7 @@ type PenHover =
   | null;
 
 type ViewBox = { minX: number; minY: number; vbW: number; vbH: number };
-type ShapePreset = 'circle' | 'roundedSquare' | 'roundedDiamond' | 'roundedTriangle';
+type ShapePreset = 'circle' | 'square' | 'diamond' | 'triangle';
 type StylePanel = 'fill' | 'stroke' | 'opacity';
 type SliderInlineProps = {
   label: string;
@@ -237,35 +237,16 @@ const makePoint = (x: number, y: number): Point => ({
   out: { x: x + 40, y },
 });
 
-const createCurvedPolygonPoints = (cx: number, cy: number, radius: number, sides: number, rotation: number, roundness: number) => {
-  const anchors: Vec[] = Array.from({ length: sides }, (_, i) => {
-    const a = rotation + (Math.PI * 2 * i) / sides;
-    return { x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * radius };
-  });
-  const points: Point[] = [];
-
-  for (let i = 0; i < sides; i += 1) {
-    const prev = anchors[(i - 1 + sides) % sides];
-    const curr = anchors[i];
-    const next = anchors[(i + 1) % sides];
-    const tx = next.x - prev.x;
-    const ty = next.y - prev.y;
-    const tLen = Math.hypot(tx, ty) || 1;
-    const ux = tx / tLen;
-    const uy = ty / tLen;
-    const dPrev = Math.hypot(curr.x - prev.x, curr.y - prev.y);
-    const dNext = Math.hypot(next.x - curr.x, next.y - curr.y);
-    const h = Math.min(dPrev, dNext) * roundness;
-    points.push({
+const createPolygonPoints = (cx: number, cy: number, radius: number, sides: number, rotation: number): Point[] =>
+  Array.from({ length: sides }, (_, i) => {
+    const angle = rotation + (Math.PI * 2 * i) / sides;
+    return {
       id: uid(),
-      p: { x: curr.x, y: curr.y },
-      in: { x: curr.x - ux * h, y: curr.y - uy * h },
-      out: { x: curr.x + ux * h, y: curr.y + uy * h },
-    });
-  }
-
-  return points;
-};
+      p: { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius },
+      in: null,
+      out: null,
+    };
+  });
 
 const createCirclePoints = (cx: number, cy: number, radius: number) => {
   // Keep preset circles aligned with the same primitive conversion used by SVG imports.
@@ -319,15 +300,15 @@ const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: num
   const points =
     preset === 'circle'
       ? createCirclePoints(cx, cy, radius)
-      : preset === 'roundedSquare'
+      : preset === 'square'
         ? createRectPoints(rectX, rectY, side, side)
-        : preset === 'roundedDiamond'
-          ? createCurvedPolygonPoints(cx, cy, radius, 4, 0, 0.12)
-          : createCurvedPolygonPoints(cx, cy, radius, 3, -Math.PI / 2, 0.16);
+        : preset === 'diamond'
+          ? createPolygonPoints(cx, cy, radius, 4, 0)
+          : createPolygonPoints(cx, cy, radius, 3, -Math.PI / 2);
   const sourceD =
     preset === 'circle'
       ? `<circle cx="${cx}" cy="${cy}" r="${radius}" />`
-      : preset === 'roundedSquare'
+      : preset === 'square'
         ? `<rect x="${rectX}" y="${rectY}" width="${side}" height="${side}" />`
         : null;
 
@@ -345,14 +326,14 @@ const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: num
     fill: 'currentColor',
     stroke: 'currentColor',
     strokeWidth: 3,
-    strokeLinecap: 'round',
-    strokeLinejoin: 'round',
+    strokeLinecap: 'butt',
+    strokeLinejoin: 'miter',
     opacity: 1,
     fillExplicit: true,
     strokeExplicit: true,
     strokeWidthExplicit: true,
-    strokeLinecapExplicit: false,
-    strokeLinejoinExplicit: false,
+    strokeLinecapExplicit: true,
+    strokeLinejoinExplicit: true,
     opacityExplicit: false,
     closed: true,
     clipPathRef: '',
@@ -1816,7 +1797,7 @@ const DEFAULT_DOCUMENT = (() => {
     return parsed;
   }
   return {
-    shapes: [createPresetPath('Path 1', 'roundedDiamond', width / 2, height / 2)],
+    shapes: [createPresetPath('Path 1', 'diamond', width / 2, height / 2)],
     viewBox: INTERNAL_VIEWBOX,
   };
 })();

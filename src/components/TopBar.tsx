@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
-import { Check, X } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 
 type Props = {
   onOpenAbout: () => void;
@@ -11,7 +10,6 @@ type Props = {
 };
 
 const TopBar = ({ onOpenAbout, onOpenSvg, onSaveSvg, onCopySvg, onClearSvg, copied }: Props) => {
-  const [confirmClear, setConfirmClear] = useState(false);
   const openButtonRef = useRef<HTMLButtonElement | null>(null);
   const saveButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -72,30 +70,9 @@ const TopBar = ({ onOpenAbout, onOpenSvg, onSaveSvg, onCopySvg, onClearSvg, copi
         <button className="control-btn text-sm" type="button" onClick={onCopySvg} title={copied ? 'Copied' : 'Copy SVG code'}>
           {copied ? 'Copied' : 'Copy SVG'}
         </button>
-        <div className="topbar-confirm-slot">
-          {!confirmClear ? (
-            <button className="control-btn text-sm confirm-text" type="button" onClick={() => setConfirmClear(true)} title="Clear document">
-              Clear
-            </button>
-          ) : (
-            <div className="topbar-inline-confirm" role="group" aria-label="Confirm clear">
-              <button
-                className="icon-btn confirm-text"
-                type="button"
-                onClick={() => {
-                  onClearSvg();
-                  setConfirmClear(false);
-                }}
-                title="Confirm clear"
-              >
-                <Check />
-              </button>
-              <button className="icon-btn confirm-no" type="button" onClick={() => setConfirmClear(false)} title="Cancel clear">
-                <X />
-              </button>
-            </div>
-          )}
-        </div>
+        <button className="control-btn text-sm" type="button" onClick={onClearSvg} title="Clear document">
+          Clear
+        </button>
       </div>
     </header>
   );

@@ -1,4 +1,4 @@
-import { Check, Trash2, X } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useState, type DragEvent } from "react";
 
 export type PathPaneRow =
@@ -38,11 +38,8 @@ type Props = {
   ) => void;
   onDropPathOnGroup: (fromPathIndex: number, targetPathIndex: number, groupDepth: number) => void;
   onDropPathOnUngrouped: (fromPathIndex: number) => void;
-  confirmDeletePath: boolean;
   canDeletePath: boolean;
-  onRequestDelete: () => void;
-  onConfirmDelete: () => void;
-  onCancelDelete: () => void;
+  onDelete: () => void;
 };
 
 const PathPane = ({
@@ -54,11 +51,8 @@ const PathPane = ({
   onReorderPath,
   onDropPathOnGroup,
   onDropPathOnUngrouped,
-  confirmDeletePath,
   canDeletePath,
-  onRequestDelete,
-  onConfirmDelete,
-  onCancelDelete,
+  onDelete,
 }: Props) => {
   const [draggedPathIndex, setDraggedPathIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<{
@@ -135,45 +129,18 @@ const PathPane = ({
     <aside className="paths-pane">
       <div className="paths-pane-header">
         <div className="paths-pane-actions">
-          {!confirmDeletePath ? (
-            <button
-              className="icon-btn delete-path-btn"
-              disabled={!canDeletePath}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onRequestDelete();
-              }}
-              title="Delete Path"
-            >
-              <Trash2 />
-            </button>
-          ) : (
-            <>
-              <button
-                className="icon-btn confirm-text"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onConfirmDelete();
-                }}
-                title="Confirm Delete"
-              >
-                <Check />
-              </button>
-              <button
-                className="icon-btn confirm-no"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCancelDelete();
-                }}
-                title="Cancel"
-              >
-                <X />
-              </button>
-            </>
-          )}
+          <button
+            className="icon-btn delete-path-btn"
+            disabled={!canDeletePath}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            title="Delete Path"
+          >
+            <Trash2 />
+          </button>
         </div>
       </div>
 

@@ -121,7 +121,6 @@ const App = () => {
   const [shapeMenu, setShapeMenu] = useState<ShapeMenuState | null>(null);
   const [lucideMenu, setLucideMenu] = useState<LucideMenuState | null>(null);
   const [currentColorMenu, setCurrentColorMenu] = useState<CurrentColorMenuState | null>(null);
-  const [confirmDeletePath, setConfirmDeletePath] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const [showViewBox, setShowViewBox] = useState(false);
@@ -361,7 +360,6 @@ const App = () => {
   const cutSelectedPathsToBuffer = () => {
     if (!copySelectedPathsToBuffer()) return false;
     deletePath();
-    setConfirmDeletePath(false);
     return true;
   };
 
@@ -723,7 +721,6 @@ const App = () => {
       if (key === 'delete' || key === 'backspace') {
         e.preventDefault();
         deletePath();
-        setConfirmDeletePath(false);
       }
     };
 
@@ -1724,10 +1721,6 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (!canDeletePath && confirmDeletePath) setConfirmDeletePath(false);
-  }, [canDeletePath, confirmDeletePath]);
-
-  useEffect(() => {
     if (!aboutOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setAboutOpen(false);
@@ -1771,7 +1764,6 @@ const App = () => {
       setLucideMenu(null);
       setStyleMenu(null);
       setCurrentColorMenu(null);
-      setConfirmDeletePath(false);
     };
     window.addEventListener('pointerdown', onWindowPointerDown, true);
     return () => window.removeEventListener('pointerdown', onWindowPointerDown, true);
@@ -1788,7 +1780,6 @@ const App = () => {
         setLucideMenu(null);
         setStyleMenu(null);
         setCurrentColorMenu(null);
-        setConfirmDeletePath(false);
       }}
     >
       <TopBar
@@ -1819,10 +1810,6 @@ const App = () => {
             setPenHover(null);
           }}
           onPenTool={() => setTool('pen')}
-          onScaleTool={() => {
-            setTool('scale');
-            setPenHover(null);
-          }}
           shapeTriggerRef={shapeTriggerRef}
           lucideTriggerRef={lucideTriggerRef}
           onOpenShapeMenu={(rect) => {
@@ -2018,17 +2005,8 @@ const App = () => {
           onReorderPath={reorderPaths}
           onDropPathOnGroup={dropPathOnGroup}
           onDropPathOnUngrouped={dropPathOnUngrouped}
-          confirmDeletePath={confirmDeletePath}
           canDeletePath={canDeletePath}
-          onRequestDelete={() => {
-            if (!canDeletePath) return;
-            setConfirmDeletePath(true);
-          }}
-          onConfirmDelete={() => {
-            deletePath();
-            setConfirmDeletePath(false);
-          }}
-          onCancelDelete={() => setConfirmDeletePath(false)}
+          onDelete={deletePath}
         />
       </div>
       <PathMetaMenu

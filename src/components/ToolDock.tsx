@@ -1,7 +1,6 @@
 import {
   BadgeInfo,
   CircleHelp,
-  Expand,
   Merge,
   MousePointer2,
   PaintBucket,
@@ -23,7 +22,6 @@ type Props = {
   setStyleTriggerRef: (index: number, el: HTMLButtonElement | null) => void;
   onSelectTool: () => void;
   onPenTool: () => void;
-  onScaleTool: () => void;
   shapeTriggerRef: RefObject<HTMLButtonElement | null>;
   lucideTriggerRef: RefObject<HTMLButtonElement | null>;
   onOpenShapeMenu: (rect: DOMRect) => void;
@@ -43,7 +41,6 @@ const ToolDock = ({
   setStyleTriggerRef,
   onSelectTool,
   onPenTool,
-  onScaleTool,
   shapeTriggerRef,
   lucideTriggerRef,
   onOpenShapeMenu,
@@ -84,20 +81,6 @@ const ToolDock = ({
           onClick={onPenTool}
         >
           <PenTool />
-        </button>
-      </Tooltip>
-      <Tooltip
-        title="Transform Tool (T)"
-        placement="right"
-        enterDelay={0}
-        enterNextDelay={0}
-        leaveDelay={0}
-      >
-        <button
-          className={tool === "scale" ? "tool active" : "tool"}
-          onClick={onScaleTool}
-        >
-          <Expand />
         </button>
       </Tooltip>
       <Tooltip
