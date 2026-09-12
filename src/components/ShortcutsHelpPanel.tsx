@@ -39,6 +39,18 @@ const sections: ShortcutSection[] = [
     ],
   },
   {
+    title: 'Pen',
+    items: [
+      { action: 'Place a point', combos: [['Click canvas']] },
+      { action: 'Draw a curved point', combos: [['Drag on canvas']] },
+      { action: 'Move point or handle', combos: [['Drag point/handle']] },
+      { action: 'Delete point', combos: [['Alt/Option', 'Click point']] },
+      { action: 'Insert point on path', combos: [['Click path edge']] },
+      { action: 'Close drawn shape', combos: [['Click first point']] },
+      { action: 'Finish open path', combos: [['Enter'], ['Escape']] },
+    ],
+  },
+  {
     title: 'File',
     items: [
       { action: 'Open SVG', combos: [['Cmd/Ctrl', 'O']] },

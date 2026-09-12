@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { DynamicIcon } from 'lucide-react/dynamic';
 import { lucideIconNames } from '../../lib/lucide-icons';
 import { type LucideMenuState } from '../../types/app-types';
 
@@ -49,7 +50,6 @@ const LucideIconMenu = ({ menu, menuRef, onClose, onSelectIcon }: Props) => {
         }
       }}
     >
-      <h3>Lucide Icons</h3>
       <input
         autoFocus
         className="lucide-menu-search"
@@ -61,7 +61,8 @@ const LucideIconMenu = ({ menu, menuRef, onClose, onSelectIcon }: Props) => {
       <div className="lucide-menu-list">
         {visible.map((name) => (
           <button key={name} className="lucide-menu-item" onClick={() => onSelectIcon(name)} title={name}>
-            {toLabel(name)}
+            <span>{toLabel(name)}</span>
+            <DynamicIcon name={name} size={20} aria-hidden="true" />
           </button>
         ))}
         {!visible.length ? <div className="lucide-menu-empty">No icons found.</div> : null}

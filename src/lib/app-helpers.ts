@@ -132,7 +132,7 @@ export const createCurrentColorMenuState = (rect: DOMRect, viewport: ViewportSiz
 });
 
 export const createShapeMenuState = (rect: DOMRect, viewport: ViewportSize): ShapeMenuState => ({
-  x: clampMenuX(rect.left, 208, viewport.width),
+  x: clampMenuX(rect.left, 352, viewport.width),
   y: clampMenuY(rect.bottom + 6, 58, viewport.height),
 });
 

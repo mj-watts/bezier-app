@@ -27,7 +27,9 @@ type Props = {
   onOpenShapeMenu: (rect: DOMRect) => void;
   onOpenLucideMenu: (rect: DOMRect) => void;
   onToggleStyleMenu: (kind: StylePanel, rect: DOMRect) => void;
-  onSmooth: () => void;
+  onSmooth: (rect: DOMRect) => void;
+  smoothTriggerRef: RefObject<HTMLButtonElement | null>;
+  smoothOpen: boolean;
   onMerge: () => void;
   canMerge: boolean;
   pathSelected: boolean;
@@ -47,6 +49,8 @@ const ToolDock = ({
   onOpenLucideMenu,
   onToggleStyleMenu,
   onSmooth,
+  smoothTriggerRef,
+  smoothOpen,
   onMerge,
   canMerge,
   pathSelected,
@@ -103,7 +107,7 @@ const ToolDock = ({
         </button>
       </Tooltip>
       <Tooltip
-        title="Add Lucide Icon"
+        title="Add icons"
         placement="right"
         enterDelay={0}
         enterNextDelay={0}
@@ -193,7 +197,7 @@ const ToolDock = ({
         enterNextDelay={0}
         leaveDelay={0}
       >
-        <button className="tool" onClick={onSmooth}>
+        <button ref={smoothTriggerRef} className={smoothOpen ? "tool active" : "tool"} aria-expanded={smoothOpen} aria-haspopup="dialog" onClick={(e) => onSmooth(e.currentTarget.getBoundingClientRect())}>
           <WandSparkles />
         </button>
       </Tooltip>

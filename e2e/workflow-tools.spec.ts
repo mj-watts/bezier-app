@@ -104,6 +104,15 @@ test('pen moves points, shows handles, deletes with Alt and inserts on the line'
   expect(marker!.y + marker!.height / 2).toBeCloseTo(position.y, 0);
   await page.mouse.click(position.x, position.y);
   await expect(page.locator('.editor .anchor')).toHaveCount(4);
+  const beforeHandle = await page.locator('#live-svg-code').inputValue();
+  const handle = await page.locator('.editor .handle.out').boundingBox();
+  if (!handle) throw new Error('Bézier handle missing');
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 + 25, handle.y + handle.height / 2 + 20);
+  await page.mouse.up();
+  await expect(page.locator('#live-svg-code')).not.toHaveValue(beforeHandle);
+  await expect(page.locator('.editor .anchor')).toHaveCount(4);
 });
 
 test('pen draws a new closed shape on an empty canvas', async ({ page }) => {
@@ -121,4 +130,26 @@ test('pen draws a new closed shape on an empty canvas', async ({ page }) => {
   await expect(page.locator('.paths-path-row')).toHaveCount(1);
   await expect(page.locator('.editor .anchor')).toHaveCount(3);
   await expect(page.locator('#live-svg-code')).toHaveValue(/Z/);
+});
+
+
+test('pen drags create curves and Enter finishes an open path', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  await page.getByRole('button', { name: 'Pen Tool (P)', exact: true }).click();
+  const canvas = await page.locator('.editor').boundingBox();
+  if (!canvas) throw new Error('Canvas missing');
+  const x = canvas.x + canvas.width * 0.35;
+  const y = canvas.y + canvas.height * 0.4;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 30, y - 25);
+  await page.mouse.up();
+  await expect(page.locator('.editor .handle')).toHaveCount(2);
+  await page.mouse.click(x + 100, y + 50);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.pen-preview')).toHaveCount(0);
+  await expect(page.locator('#live-svg-code')).not.toHaveValue(/Z/);
+  await page.mouse.click(x + 160, y + 100);
+  await expect(page.locator('.paths-path-row')).toHaveCount(2);
 });

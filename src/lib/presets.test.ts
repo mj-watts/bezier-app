@@ -26,3 +26,14 @@ it.each([['cross', 12], ['star', 10], ['moon', 4]] as const)('%s is a distinct c
   expect(shape.points).toHaveLength(points);
   expect(shape.points.some((point) => point.in || point.out)).toBe(preset === 'moon');
 });
+
+
+it('editing the output viewBox preserves artwork coordinates', () => {
+  const coordinateBox = { minX: 0, minY: 0, vbW: 400, vbH: 400 };
+  const outputBox = { minX: -30, minY: 20, vbW: 200, vbH: 150 };
+  const shapes = (['square', 'circle', 'cross', 'moon', 'star'] as const).map((preset) => createPresetPath(preset, preset, 200, 200));
+  const before = serializeSvg(shapes, coordinateBox);
+  const after = serializeSvg(shapes, outputBox, coordinateBox);
+  expect(after).toContain('viewBox="-30 20 200 150"');
+  expect(after.replace(/<svg[^>]*>/, '')).toBe(before.replace(/<svg[^>]*>/, ''));
+});

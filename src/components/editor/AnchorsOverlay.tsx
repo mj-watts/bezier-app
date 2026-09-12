@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction } from 'react';
-import { clonePoint, type DragTarget, type PathShape, type PenHover, type Tool, type Vec } from '../../lib/editor-core';
+import { clonePoint, editablePoint, type DragTarget, type PathShape, type PenHover, type Tool, type Vec } from '../../lib/editor-core';
 
 type Props = {
   pathSelected: boolean;
@@ -10,6 +10,7 @@ type Props = {
   selectedPoint: number;
   worldUnitsPerPx: number;
   penHover: PenHover;
+  altDown: boolean;
   spaceDown: boolean;
   pushUndo: () => void;
   toLocal: (clientX: number, clientY: number, target: SVGSVGElement) => Vec;
@@ -28,6 +29,7 @@ const AnchorsOverlay = ({
   selectedPoint,
   worldUnitsPerPx,
   penHover,
+  altDown,
   spaceDown,
   pushUndo,
   toLocal,
@@ -45,9 +47,9 @@ const AnchorsOverlay = ({
     <>
             {pathSelected &&
               selectedPaths.length === 1 &&
-              activePath.points.map((pt, i) => (
+              activePath.points.map((point) => tool === 'pen' ? editablePoint(point) : point).map((pt, i) => (
               <g key={pt.id}>
-                {tool === 'select' && selectedPoints.length === 1 && i === selectedPoint && pt.in && (
+                {(tool === 'select' || tool === 'pen') && selectedPoints.length === 1 && i === selectedPoint && pt.in && (
                   <>
                     <line
                       x1={pt.p.x}
@@ -78,7 +80,7 @@ const AnchorsOverlay = ({
                   </>
                 )}
 
-                {tool === 'select' && selectedPoints.length === 1 && i === selectedPoint && pt.out && (
+                {(tool === 'select' || tool === 'pen') && selectedPoints.length === 1 && i === selectedPoint && pt.out && (
                   <>
                     <line
                       x1={pt.p.x}
@@ -115,7 +117,7 @@ const AnchorsOverlay = ({
                   width={anchorDiameterFor(selectedPoints.length === 1 && i === selectedPoint)}
                   height={anchorDiameterFor(selectedPoints.length === 1 && i === selectedPoint)}
                   className={
-                    penHover?.kind === 'anchor' && penHover.pointIndex === i
+                    altDown && penHover?.kind === 'anchor' && penHover.pathIndex === selectedPath && penHover.pointIndex === i
                       ? 'anchor pen-delete'
                       : selectedPoints.includes(i)
                         ? 'anchor selected'

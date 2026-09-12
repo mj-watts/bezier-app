@@ -13,6 +13,7 @@ import LucideIconMenu from './components/menus/LucideIconMenu';
 import PathMetaMenu from './components/menus/PathMetaMenu';
 import ShapeMenu from './components/menus/ShapeMenu';
 import StyleMenu from './components/menus/StyleMenu';
+import SmoothMenu from './components/menus/SmoothMenu';
 import {
   type CurrentColorMenuState,
   type CursorZoomFocus,
@@ -38,10 +39,12 @@ import {
   MAX_ZOOM,
   MERGE_MAX_STEP_DISTANCE,
   MIN_ZOOM,
-  SliderInline,
   ZOOM_RECENTER_BLEND,
   clamp,
   clonePoints,
+  clonePoint,
+  editablePoint,
+  splitPathSegment,
   cloneShapes,
   closestSegment,
   createPresetPath,
@@ -50,7 +53,6 @@ import {
   formatSvgCode,
   getPathBounds,
   highlightSelectedPathHtml,
-  makePoint,
   mapPathDFromViewBox,
   mapPointFromViewBox,
   mergePointPair,
@@ -87,6 +89,11 @@ import {
 } from './lib/app-helpers';
 import { openSvgFile as openSvgTextFromFile, saveSvgFile as saveSvgCodeToFile } from './lib/file-io';
 
+const penCursorIcon = (badge: string) => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M3 27 7 14 17 4 25 12 15 22Z" fill="#151b23" stroke="white" stroke-width="1.5"/><path d="m3 27 10-10m-6-3 8 8" fill="none" stroke="white"/><text x="22" y="30" font-size="17" font-family="sans-serif" font-weight="bold" fill="white">${badge}</text></svg>`)}") 3 27, crosshair`;
+const PEN_CURSOR = penCursorIcon('');
+const PEN_ADD_CURSOR = penCursorIcon('+');
+const PEN_DELETE_CURSOR = penCursorIcon('−');
+
 const DEFAULT_ZOOM = 0.5;
 const MAX_GROUP_NESTING = 3;
 
@@ -100,6 +107,9 @@ const App = () => {
   const [selectedPoint, setSelectedPoint] = useState(0);
   const [selectedPoints, setSelectedPoints] = useState<number[]>([0]);
   const [penHover, setPenHover] = useState<PenHover>(null);
+  const [altDown, setAltDown] = useState(false);
+  const [penDraftId, setPenDraftId] = useState<string | null>(null);
+  const [penPosition, setPenPosition] = useState<Vec | null>(null);
   const [transformAllPaths, setTransformAllPaths] = useState(false);
   const [codePaneWidth, setCodePaneWidth] = useState(420);
   const [paneDrag, setPaneDrag] = useState<PaneDrag | null>(null);
@@ -114,6 +124,7 @@ const App = () => {
   const [redoStack, setRedoStack] = useState<Snapshot[]>([]);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [docViewBox, setDocViewBox] = useState<ViewBox>(DEFAULT_DOCUMENT.viewBox);
+  const [coordinateViewBox, setCoordinateViewBox] = useState<ViewBox>(DEFAULT_DOCUMENT.viewBox);
   const [copied, setCopied] = useState(false);
   const [pathMetaMenu, setPathMetaMenu] = useState<PathMetaMenuState | null>(null);
   const [groupMetaMenu, setGroupMetaMenu] = useState<GroupMetaMenuState | null>(null);
@@ -123,6 +134,7 @@ const App = () => {
   const [currentColorMenu, setCurrentColorMenu] = useState<CurrentColorMenuState | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const [smoothMenu, setSmoothMenu] = useState<{ x: number; y: number } | null>(null);
   const [showViewBox, setShowViewBox] = useState(false);
   const [currentColorValue, setCurrentColorValue] = useState('#ffffff');
   const [copiedPathsBuffer, setCopiedPathsBuffer] = useState<PathShape[] | null>(null);
@@ -143,6 +155,24 @@ const App = () => {
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
   const currentColorMenuRef = useRef<HTMLDivElement | null>(null);
   const pasteOffsetStepRef = useRef(1);
+  const smoothMenuRef = useRef<HTMLDivElement | null>(null);
+  const smoothTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (tool !== 'pen') { setPenDraftId(null); setPenHover(null); setPenPosition(null); }
+  }, [tool]);
+
+  useEffect(() => {
+    if (!smoothMenu) return;
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!smoothMenuRef.current?.contains(target) && !smoothTriggerRef.current?.contains(target)) setSmoothMenu(null);
+    };
+    const closeEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setSmoothMenu(null); smoothTriggerRef.current?.focus(); } };
+    window.addEventListener('pointerdown', closeOutside, true);
+    window.addEventListener('keydown', closeEscape);
+    return () => { window.removeEventListener('pointerdown', closeOutside, true); window.removeEventListener('keydown', closeEscape); };
+  }, [smoothMenu]);
 
   const activePath = shapes[selectedPath] ?? DEFAULT_DOCUMENT.shapes[0];
   const transformTargetIndices = useMemo(() => {
@@ -191,23 +221,23 @@ const App = () => {
   }, [transformBounds, transformPivot, pathSelected, transformAllPaths, transformUiAngleRad, activePath, transformTargetIndices, drag]);
   const highlightedCodeHtml = useMemo(() => syntaxHighlightSvgHtml(codeText), [codeText]);
   const editorDocViewBox = useMemo(() => {
-    const topLeft = mapPointFromViewBox({ x: docViewBox.minX, y: docViewBox.minY }, docViewBox);
-    const bottomRight = mapPointFromViewBox({ x: docViewBox.minX + docViewBox.vbW, y: docViewBox.minY + docViewBox.vbH }, docViewBox);
+    const topLeft = mapPointFromViewBox({ x: docViewBox.minX, y: docViewBox.minY }, coordinateViewBox);
+    const bottomRight = mapPointFromViewBox({ x: docViewBox.minX + docViewBox.vbW, y: docViewBox.minY + docViewBox.vbH }, coordinateViewBox);
     return {
       minX: topLeft.x,
       minY: topLeft.y,
       vbW: Math.max(0, bottomRight.x - topLeft.x),
       vbH: Math.max(0, bottomRight.y - topLeft.y),
     };
-  }, [docViewBox]);
+  }, [docViewBox, coordinateViewBox]);
 
   useEffect(() => {
     if (lastShapesUpdateFromCodeRef.current) {
       lastShapesUpdateFromCodeRef.current = false;
       return;
     }
-    setCodeText(serializeSvg(shapes, docViewBox));
-  }, [shapes, docViewBox]);
+    setCodeText(serializeSvg(shapes, docViewBox, coordinateViewBox));
+  }, [shapes, docViewBox, coordinateViewBox]);
 
   const snapshotCurrent = (): Snapshot => ({
     shapes: cloneShapes(shapes),
@@ -217,9 +247,18 @@ const App = () => {
     selectedPoints,
     transformAllPaths,
     codeText,
+    docViewBox,
+    coordinateViewBox,
+    pathSelected,
   });
 
   const applySnapshot = (shot: Snapshot) => {
+    lastShapesUpdateFromCodeRef.current = true;
+    setDocViewBox(shot.docViewBox);
+    setCoordinateViewBox(shot.coordinateViewBox);
+    setPathSelected(shot.pathSelected);
+    setPenDraftId(null);
+    setPenHover(null);
     setShapes(cloneShapes(shot.shapes));
     setSelectedPath(shot.selectedPath);
     setSelectedPaths(shot.selectedPaths);
@@ -648,6 +687,7 @@ const App = () => {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') setAltDown(true);
       if (e.code === 'Space') {
         const target = e.target as HTMLElement | null;
         if (target) {
@@ -665,6 +705,12 @@ const App = () => {
       if (target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
       const key = e.key.toLowerCase();
+      if (tool === 'pen' && (key === 'enter' || key === 'escape')) {
+        e.preventDefault();
+        setPenDraftId(null);
+        setPenHover(null);
+        return;
+      }
       if (key === 'v' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         setTool('select');
@@ -726,8 +772,9 @@ const App = () => {
 
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') setSpaceDown(false);
+      if (e.key === 'Alt') setAltDown(false);
     };
-    const onBlur = () => setSpaceDown(false);
+    const onBlur = () => { setSpaceDown(false); setAltDown(false); };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -737,7 +784,7 @@ const App = () => {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [shapes, pathSelected, selectedPath, selectedPaths, copiedPathsBuffer]);
+  }, [shapes, pathSelected, selectedPath, selectedPaths, selectedPoint, selectedPoints, copiedPathsBuffer, tool, coordinateViewBox, docViewBox, codeText, transformAllPaths]);
 
   const updatePath = (pathIndex: number, mutator: (path: PathShape) => PathShape) => {
     setShapes((curr) => curr.map((path, i) => (i === pathIndex ? mutator(path) : path)));
@@ -834,10 +881,10 @@ const App = () => {
     () =>
       shapes.map((shape) =>
         !shape.geometryDirty && shape.sourceD && !shape.sourceD.startsWith('<')
-          ? mapPathDFromViewBox(shape.sourceD, docViewBox)
+          ? mapPathDFromViewBox(shape.sourceD, coordinateViewBox)
           : pathData(shape.points, shape.closed),
       ),
-    [docViewBox, shapes],
+    [coordinateViewBox, shapes],
   );
   const defaultDocCode = useMemo(() => serializeSvg(DEFAULT_DOCUMENT.shapes, DEFAULT_DOCUMENT.viewBox), []);
   const hasDefaultViewBox =
@@ -950,30 +997,116 @@ const App = () => {
     });
   };
 
-  const addPointOnSegment = (pathIndex: number, segmentIndex: number, pos: Vec) => {
-    pushUndo();
-    updatePathGeometry(pathIndex, (path) => {
-      const created = makePoint(pos.x, pos.y);
-      const idx = segmentIndex + 1;
-      const points = [...path.points.slice(0, idx), created, ...path.points.slice(idx)];
-      setPathSelected(true);
-      setSelectedPoint(idx);
-      setSelectedPoints([idx]);
-      return { ...path, points };
-    });
+  const selectOnlyPath = (pathIndex: number, pointIndex = 0) => {
+    setPathSelected(true);
+    setSelectedPath(pathIndex);
+    setSelectedPaths([pathIndex]);
+    setSelectedPoint(pointIndex);
+    setSelectedPoints([pointIndex]);
+    setTransformAllPaths(false);
   };
 
   const deletePoint = (pathIndex: number, pointIndex: number) => {
+    const path = shapes[pathIndex];
+    if (!path) return;
     pushUndo();
-    updatePathGeometry(pathIndex, (path) => {
-      if (path.points.length <= 2) return path;
-      const points = path.points.filter((_, i) => i !== pointIndex);
-      const nextSelected = clamp(pointIndex - 1, 0, points.length - 1);
-      setPathSelected(true);
-      setSelectedPoint(nextSelected);
-      setSelectedPoints([nextSelected]);
-      return { ...path, points };
-    });
+    if (path.points.length === 1) {
+      setShapes((current) => current.filter((_, i) => i !== pathIndex));
+      clearSelection();
+      setPenDraftId(null);
+    } else {
+      updatePathGeometry(pathIndex, (path) => ({
+        ...path,
+        closed: path.closed && path.points.length > 3,
+        points: path.points.filter((_, i) => i !== pointIndex),
+      }));
+      selectOnlyPath(pathIndex, Math.max(0, pointIndex - 1));
+    }
+    setPenHover(null);
+  };
+
+  const penHitAt = (pos: Vec, unitsPerPx: number): PenHover => {
+    if (pathSelected && selectedPaths.length === 1 && selectedPoints.length === 1 && shapes[selectedPath]?.points[selectedPoint]) {
+      const point = editablePoint(shapes[selectedPath].points[selectedPoint]);
+      for (const side of ['in', 'out'] as const) {
+        if (point[side] && dist(point[side]!, pos) < 6 * unitsPerPx) return { kind: 'handle', pathIndex: selectedPath, pointIndex: selectedPoint, side };
+      }
+    }
+    for (let pathIndex = shapes.length - 1; pathIndex >= 0; pathIndex--) {
+      const pointIndex = shapes[pathIndex].points.findIndex((pt) => dist(pt.p, pos) < 7 * unitsPerPx);
+      if (pointIndex >= 0) return { kind: 'anchor', pathIndex, pointIndex };
+    }
+    let nearest: PenHover = null;
+    let distance = 8 * unitsPerPx;
+    for (let pathIndex = shapes.length - 1; pathIndex >= 0; pathIndex--) {
+      const hit = closestSegment(shapes[pathIndex], pos);
+      if (hit && hit.distance < distance) {
+        nearest = { kind: 'segment', pathIndex, segmentIndex: hit.segmentIndex, t: hit.t, position: hit.position };
+        distance = hit.distance;
+      }
+    }
+    return nearest;
+  };
+
+  const cursorForPen = (hit: PenHover, alt: boolean) =>
+    hit?.kind === 'anchor' ? (alt ? PEN_DELETE_CURSOR : 'move')
+    : hit?.kind === 'handle' ? 'move'
+    : hit?.kind === 'segment' ? PEN_ADD_CURSOR : PEN_CURSOR;
+
+  const onPenPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (tool !== 'pen' || spaceDown || e.button !== 0 || (e.target as Element).closest('.viewbox-top-layer')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.focus({ preventScroll: true });
+    const pos = toLocal(e.clientX, e.clientY, e.currentTarget);
+    const matrix = e.currentTarget.getScreenCTM();
+    const hit = penHitAt(pos, matrix ? 1 / Math.hypot(matrix.a, matrix.b) : 1 / zoom);
+    setPenHover(hit);
+    const draftIndex = shapes.findIndex((path) => path.id === penDraftId);
+    if (hit?.kind === 'anchor' && !e.altKey && hit.pathIndex === draftIndex && hit.pointIndex === 0 && shapes[draftIndex].points.length >= 3) {
+      pushUndo();
+      updatePathGeometry(draftIndex, (path) => ({ ...path, closed: true }));
+      setPenDraftId(null);
+      selectOnlyPath(draftIndex);
+      return;
+    }
+    if (hit?.kind === 'anchor' && e.altKey) {
+      deletePoint(hit.pathIndex, hit.pointIndex);
+      return;
+    }
+    if (hit?.kind === 'anchor' || hit?.kind === 'handle') {
+      pushUndo();
+      selectOnlyPath(hit.pathIndex, hit.pointIndex);
+      const point = shapes[hit.pathIndex].points[hit.pointIndex];
+      setDrag({ kind: hit.kind === 'anchor' ? 'anchor' : hit.side, pathIndex: hit.pathIndex, pointIndex: hit.pointIndex,
+        startPos: pos, base: clonePoint(hit.kind === 'handle' ? editablePoint(point) : point) });
+    } else if (hit?.kind === 'segment') {
+      pushUndo();
+      updatePathGeometry(hit.pathIndex, (path) => splitPathSegment(path, hit.segmentIndex, hit.t));
+      selectOnlyPath(hit.pathIndex, hit.segmentIndex + 1);
+      setPenHover(null);
+      return;
+    } else {
+      if (e.altKey) return;
+      pushUndo();
+      const point = { id: uid(), p: pos, in: null, out: null };
+      let pathIndex = draftIndex;
+      let pointIndex: number;
+      if (draftIndex >= 0) {
+        pointIndex = shapes[draftIndex].points.length;
+        updatePathGeometry(draftIndex, (path) => ({ ...path, points: [...path.points, point] }));
+      } else {
+        const path = { ...createPresetPath(`Path ${shapes.length + 1}`, 'square', pos.x, pos.y),
+          points: [point], closed: false, fill: 'none', stroke: 'currentColor', sourceD: null, geometryDirty: true };
+        pathIndex = shapes.length;
+        pointIndex = 0;
+        setShapes((current) => [...current, path]);
+        setPenDraftId(path.id);
+      }
+      selectOnlyPath(pathIndex, pointIndex);
+      setDrag({ kind: 'penDraw', pathIndex, pointIndex, startPos: pos });
+    }
+    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const mergeSelectedAnchors = () => {
@@ -1067,15 +1200,18 @@ const App = () => {
     const nx = clamp((e.clientX - rect.left) / rect.width, 0, 1);
     const ny = clamp((e.clientY - rect.top) / rect.height, 0, 1);
     setCursorZoomFocus({ nx, ny });
-    const anchorHit = 6 / zoom;
-    const segmentHit = 10 / zoom;
+    const penHit = tool === 'pen' ? penHitAt(pos, worldUnitsPerPx) : null;
+    if (tool === 'pen') {
+      setPenPosition(pos);
+      if (!drag) setPenHover(penHit);
+    }
 
     if (!drag) {
       let nextCursor = '';
       if (spaceDown) {
         nextCursor = 'grab';
       } else if (tool === 'pen') {
-        nextCursor = 'crosshair';
+        nextCursor = cursorForPen(penHit, e.altKey);
       } else if (tool === 'scale') {
         nextCursor = 'move';
       } else if (tool === 'select' && pathSelected) {
@@ -1116,16 +1252,6 @@ const App = () => {
       e.currentTarget.style.cursor = nextCursor;
     }
 
-    if (tool === 'pen' && activePath) {
-      const anchorIndex = activePath.points.findIndex((pt) => dist(pt.p, pos) < anchorHit);
-      if (anchorIndex >= 0) {
-        setPenHover({ kind: 'anchor', pointIndex: anchorIndex });
-      } else {
-        const seg = closestSegment(activePath, pos);
-        setPenHover(seg && seg.distance < segmentHit ? { kind: 'segment', segmentIndex: seg.segmentIndex } : null);
-      }
-    }
-
     if (marquee) {
       setMarquee((m) => (m ? { ...m, current: pos } : m));
       return;
@@ -1137,6 +1263,32 @@ const App = () => {
       const dx = (e.clientX - drag.startClient.x) / zoom;
       const dy = (e.clientY - drag.startClient.y) / zoom;
       setViewOrigin(clampOriginForZoom({ x: drag.startOrigin.x - dx, y: drag.startOrigin.y - dy }, zoom));
+      return;
+    }
+
+    if (drag.kind === 'viewBox') {
+      const scale = Math.min(width / coordinateViewBox.vbW, height / coordinateViewBox.vbH);
+      const dx = (pos.x - drag.startPos.x) / scale;
+      const dy = (pos.y - drag.startPos.y) / scale;
+      const base = drag.base;
+      if (drag.handle === 'move') {
+        setDocViewBox({ ...base, minX: base.minX + dx, minY: base.minY + dy });
+      } else {
+        const minSize = 0.1;
+        let left = base.minX, top = base.minY, right = left + base.vbW, bottom = top + base.vbH;
+        if (drag.handle.includes('w')) left = Math.min(right - minSize, left + dx);
+        if (drag.handle.includes('e')) right = Math.max(left + minSize, right + dx);
+        if (drag.handle.includes('n')) top = Math.min(bottom - minSize, top + dy);
+        if (drag.handle.includes('s')) bottom = Math.max(top + minSize, bottom + dy);
+        setDocViewBox({ minX: left, minY: top, vbW: right - left, vbH: bottom - top });
+      }
+      return;
+    }
+
+    if (drag.kind === 'penDraw') {
+      if (dist(pos, drag.startPos) < 3 * worldUnitsPerPx) return;
+      updatePathGeometry(drag.pathIndex, (path) => ({ ...path, points: path.points.map((point, i) =>
+        i === drag.pointIndex ? { ...point, out: pos, in: mirrorHandle(point.p, pos) } : point) }));
       return;
     }
 
@@ -1181,7 +1333,7 @@ const App = () => {
       setShapes(() => {
         const dx = pos.x - drag.startPos.x;
         const dy = pos.y - drag.startPos.y;
-        const s = Math.min(width / docViewBox.vbW, height / docViewBox.vbH);
+        const s = Math.min(width / coordinateViewBox.vbW, height / coordinateViewBox.vbH);
         const dxVb = s === 0 ? 0 : dx / s;
         const dyVb = s === 0 ? 0 : dy / s;
         const map = (v: Vec): Vec => ({ x: v.x + dx, y: v.y + dy });
@@ -1264,7 +1416,7 @@ const App = () => {
           const dy = pos.y - drag.startPos.y;
           if (!drag.base.in) return path;
           pt.in = { x: drag.base.in.x + dx, y: drag.base.in.y + dy };
-          if (pt.out) pt.out = mirrorHandle(pt.p, pt.in);
+          if (pt.out || tool === 'pen') pt.out = mirrorHandle(pt.p, pt.in);
         }
 
         if (drag.kind === 'out') {
@@ -1272,28 +1424,12 @@ const App = () => {
           const dy = pos.y - drag.startPos.y;
           if (!drag.base.out) return path;
           pt.out = { x: drag.base.out.x + dx, y: drag.base.out.y + dy };
-          if (pt.in) pt.in = mirrorHandle(pt.p, pt.out);
+          if (pt.in || tool === 'pen') pt.in = mirrorHandle(pt.p, pt.out);
         }
 
         return markGeometryDirty({ ...path, points });
       }),
     );
-  };
-
-  const onCanvasClick = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (spaceDown) return;
-    if (marquee) return;
-    if (tool !== 'pen' || !activePath) return;
-    const pos = toLocal(e.clientX, e.clientY, e.currentTarget);
-
-    if (penHover?.kind === 'anchor') {
-      deletePoint(selectedPath, penHover.pointIndex);
-      return;
-    }
-
-    if (penHover?.kind === 'segment') {
-      addPointOnSegment(selectedPath, penHover.segmentIndex, pos);
-    }
   };
 
   const applyCodeText = (text: string, fromUser = false): boolean => {
@@ -1306,6 +1442,9 @@ const App = () => {
     lastShapesUpdateFromCodeRef.current = true;
     setCodeError('');
     setDocViewBox(parsed.viewBox);
+    setCoordinateViewBox(parsed.viewBox);
+    setPenDraftId(null);
+    setPenHover(null);
     setShapes(parsed.shapes);
     setSelectedPath(0);
     setSelectedPaths([0]);
@@ -1532,6 +1671,8 @@ const App = () => {
     setSelectedPoints([]);
     setTransformAllPaths(false);
     setDocViewBox(DEFAULT_DOCUMENT.viewBox);
+    setCoordinateViewBox(DEFAULT_DOCUMENT.viewBox);
+    setPenDraftId(null);
     setZoom(DEFAULT_ZOOM);
     setViewOrigin(getCenteredOriginForShapes([], DEFAULT_ZOOM));
     setCodeError('');
@@ -1825,7 +1966,11 @@ const App = () => {
             if (styleMenu?.kind === kind) setStyleMenu(null);
             else openStyleMenu(kind, rect);
           }}
-          onSmooth={smoothPathOrSvg}
+          smoothTriggerRef={smoothTriggerRef}
+          smoothOpen={!!smoothMenu}
+          onSmooth={(rect) => {
+            setSmoothMenu(smoothMenu ? null : { x: clamp(rect.right + 8, 8, window.innerWidth - 364), y: clamp(rect.top, 8, window.innerHeight - 200) });
+          }}
           onMerge={mergeSelectedAnchors}
           canMerge={pathSelected && selectedPoints.length >= 2}
           pathSelected={pathSelected}
@@ -1837,8 +1982,6 @@ const App = () => {
           <ControlsBar
             closed={activePath.closed}
             onToggleClosed={() => updateActiveStyle({ closed: !activePath.closed })}
-            onSimplify={simplifyPathOrSvg}
-            pathSelected={pathSelected}
             tool={tool}
             transformAllPaths={transformAllPaths}
             onToggleTransformAllPaths={setTransformAllPaths}
@@ -1862,15 +2005,6 @@ const App = () => {
             onRedo={redo}
             canUndo={undoStack.length > 0}
             canRedo={redoStack.length > 0}
-            renderThresholdControl={
-              <SliderInline
-                label="Simplify threshold"
-                min={2}
-                max={40}
-                value={simplifyThreshold}
-                onChange={(v) => setSimplifyThreshold(Math.round(v))}
-              />
-            }
             renderCurrentColorControl={
               <button
                 ref={currentColorTriggerRef}
@@ -1901,7 +2035,11 @@ const App = () => {
               onCanvasMove={onCanvasMove}
               setCursorZoomFocus={setCursorZoomFocus}
               setPenHover={setPenHover}
-              onCanvasClick={onCanvasClick}
+              onPenPointerDown={onPenPointerDown}
+              penCursor={cursorForPen(penHover, altDown)}
+              altDown={altDown}
+              penDraft={shapes.find((path) => path.id === penDraftId) ?? null}
+              penPosition={penPosition}
               clearSelection={clearSelection}
               toLocal={toLocal}
               marquee={marquee}
@@ -1915,7 +2053,7 @@ const App = () => {
               setSelectedPoints={setSelectedPoints}
               enterTransformMode={enterTransformMode}
               onPathDoubleClick={(pathIndex) => {
-                selectNextGroupForPath(pathIndex);
+                selectOnlyPath(pathIndex);
               }}
               showViewBox={showViewBox}
               editorDocViewBox={editorDocViewBox}
@@ -2025,6 +2163,10 @@ const App = () => {
         onIdValueChange={(next) => setGroupMetaMenu((m) => (m ? { ...m, idValue: next } : m))}
         onClassValueChange={(next) => setGroupMetaMenu((m) => (m ? { ...m, classValue: next } : m))}
       />
+      <SmoothMenu menu={smoothMenu} menuRef={smoothMenuRef} threshold={simplifyThreshold}
+        onThresholdChange={(value) => setSimplifyThreshold(Math.round(value))} pathSelected={pathSelected}
+        onSmooth={smoothPathOrSvg} onSimplify={simplifyPathOrSvg}
+        onClose={() => { setSmoothMenu(null); smoothTriggerRef.current?.focus(); }} />
       <ShapeMenu menu={shapeMenu} menuRef={shapeMenuRef} onAddPreset={addPresetPath} />
       <LucideIconMenu menu={lucideMenu} menuRef={lucideMenuRef} onClose={() => setLucideMenu(null)} onSelectIcon={addLucideIcon} />
       <StyleMenu

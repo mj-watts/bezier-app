@@ -6,8 +6,6 @@ type Tool = 'select' | 'pen' | 'scale';
 type Props = {
   closed: boolean;
   onToggleClosed: () => void;
-  onSimplify: () => void;
-  pathSelected: boolean;
   tool: Tool;
   transformAllPaths: boolean;
   onToggleTransformAllPaths: (next: boolean) => void;
@@ -21,15 +19,12 @@ type Props = {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
-  renderThresholdControl: ReactNode;
   renderCurrentColorControl: ReactNode;
 };
 
 const ControlsBar = ({
   closed,
   onToggleClosed,
-  onSimplify,
-  pathSelected,
   tool,
   transformAllPaths,
   onToggleTransformAllPaths,
@@ -43,7 +38,6 @@ const ControlsBar = ({
   onRedo,
   canUndo,
   canRedo,
-  renderThresholdControl,
   renderCurrentColorControl,
 }: Props) => {
   return (
@@ -60,15 +54,6 @@ const ControlsBar = ({
         </span>
         <span>Closed</span>
       </button>
-
-      <span className="control-group-divider" aria-hidden="true" />
-
-      <div className="control-group simplify-group">
-        {renderThresholdControl}
-        <button className="control-btn text-sm" type="button" onClick={onSimplify}>
-          {pathSelected ? 'Simplify Path' : 'Simplify SVG'}
-        </button>
-      </div>
 
       <span className="control-group-divider" aria-hidden="true" />
 

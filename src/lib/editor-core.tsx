@@ -1,4 +1,4 @@
-import MuiSlider from '@mui/material/Slider';
+import { type CSSProperties } from 'react';
 
 type Vec = { x: number; y: number };
 
@@ -52,9 +52,14 @@ type Snapshot = {
   selectedPoints: number[];
   transformAllPaths: boolean;
   codeText: string;
+  docViewBox: ViewBox;
+  coordinateViewBox: ViewBox;
+  pathSelected: boolean;
 };
 
 type DragTarget =
+  | { kind: 'penDraw'; pathIndex: number; pointIndex: number; startPos: Vec }
+  | { kind: 'viewBox'; handle: string; startPos: Vec; base: ViewBox }
   | { kind: 'anchor'; pathIndex: number; pointIndex: number; startPos: Vec; base: Point }
   | { kind: 'in'; pathIndex: number; pointIndex: number; startPos: Vec; base: Point }
   | { kind: 'out'; pathIndex: number; pointIndex: number; startPos: Vec; base: Point }
@@ -95,12 +100,13 @@ type DragTarget =
   | null;
 
 type PenHover =
-  | { kind: 'anchor'; pointIndex: number }
-  | { kind: 'segment'; segmentIndex: number }
+  | { kind: 'anchor'; pathIndex: number; pointIndex: number }
+  | { kind: 'handle'; pathIndex: number; pointIndex: number; side: 'in' | 'out' }
+  | { kind: 'segment'; pathIndex: number; segmentIndex: number; t: number; position: Vec }
   | null;
 
 type ViewBox = { minX: number; minY: number; vbW: number; vbH: number };
-type ShapePreset = 'circle' | 'square' | 'diamond' | 'triangle';
+type ShapePreset = 'circle' | 'square' | 'diamond' | 'triangle' | 'cross' | 'moon' | 'star';
 type StylePanel = 'fill' | 'stroke' | 'opacity';
 type SliderInlineProps = {
   label: string;
@@ -189,30 +195,21 @@ const SliderInline = ({ label, value, min, max, step = 1, unit = '', disabled, o
   return (
     <div className={`slider-inline${disabled ? ' disabled' : ''}`}>
       <span className="slider-inline-label">{label}:</span>
-      <MuiSlider
+      <input
+        className="filled-slider"
+        type="range"
+        aria-label={label}
         min={min}
         max={max}
         step={step}
         value={safe}
         disabled={disabled}
-        onChange={(_, v: number | number[]) => onChange(Array.isArray(v) ? Number(v[0]) : Number(v))}
-        size="small"
-        sx={{
-          color: '#ff9a00',
-          height: 4,
-          '& .MuiSlider-track': { border: 'none' },
-          '& .MuiSlider-rail': { backgroundColor: '#344152', opacity: 1 },
-          '& .MuiSlider-thumb': {
-            width: 14,
-            height: 14,
-            backgroundColor: '#ff9a00',
-            border: '2px solid #ffe1b0',
-            boxShadow: '0 0 0 1px rgba(255,154,0,0.35)',
-          },
-        }}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ '--slider-fill': `${((safe - min) / (max - min)) * 100}%` } as CSSProperties}
       />
       <input
         className="slider-inline-input"
+        aria-label={`${label} value`}
         type="number"
         min={min}
         max={max}
@@ -297,14 +294,27 @@ const createPresetPath = (name: string, preset: ShapePreset, cx: number, cy: num
   const side = radius * 2;
   const rectX = cx - radius;
   const rectY = cy - radius;
+  const polygon = (vertices: Vec[]): Point[] => vertices.map((p) => ({ id: uid(), p, in: null, out: null }));
   const points =
-    preset === 'circle'
-      ? createCirclePoints(cx, cy, radius)
-      : preset === 'square'
-        ? createRectPoints(rectX, rectY, side, side)
-        : preset === 'diamond'
-          ? createPolygonPoints(cx, cy, radius, 4, 0)
-          : createPolygonPoints(cx, cy, radius, 3, -Math.PI / 2);
+    preset === 'circle' ? createCirclePoints(cx, cy, radius)
+    : preset === 'square' ? createRectPoints(rectX, rectY, side, side)
+    : preset === 'diamond' ? createPolygonPoints(cx, cy, radius, 4, 0)
+    : preset === 'triangle' ? createPolygonPoints(cx, cy, radius, 3, -Math.PI / 2)
+    : preset === 'cross' ? polygon([
+        [-1/3, -1], [1/3, -1], [1/3, -1/3], [1, -1/3], [1, 1/3], [1/3, 1/3],
+        [1/3, 1], [-1/3, 1], [-1/3, 1/3], [-1, 1/3], [-1, -1/3], [-1/3, -1/3],
+      ].map(([x, y]) => ({ x: cx + x * radius, y: cy + y * radius })))
+    : preset === 'star' ? polygon(Array.from({ length: 10 }, (_, i) => {
+        const angle = -Math.PI / 2 + i * Math.PI / 5;
+        const r = i % 2 ? radius * 0.42 : radius;
+        return { x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r };
+      }))
+    : [
+        { id: uid(), p: { x: cx, y: cy - radius }, in: { x: cx - radius * .35, y: cy - radius }, out: { x: cx - radius * .55228475, y: cy - radius } },
+        { id: uid(), p: { x: cx - radius, y: cy }, in: { x: cx - radius, y: cy - radius * .55228475 }, out: { x: cx - radius, y: cy + radius * .55228475 } },
+        { id: uid(), p: { x: cx, y: cy + radius }, in: { x: cx - radius * .55228475, y: cy + radius }, out: { x: cx - radius * .35, y: cy + radius } },
+        { id: uid(), p: { x: cx - radius * .35, y: cy }, in: { x: cx - radius * .35, y: cy + radius * .55 }, out: { x: cx - radius * .35, y: cy - radius * .55 } },
+      ];
   const sourceD =
     preset === 'circle'
       ? `<circle cx="${cx}" cy="${cy}" r="${radius}" />`
@@ -507,29 +517,72 @@ const getPathBounds = (points: Point[]) => {
 
 const closestSegment = (path: PathShape, pos: Vec) => {
   if (path.points.length < 2) return null;
-  let best = { segmentIndex: 0, distance: Number.POSITIVE_INFINITY };
-
+  let best = { segmentIndex: 0, distance: Infinity, t: 0, position: path.points[0].p };
   const segmentCount = path.closed ? path.points.length : path.points.length - 1;
-
-  for (let i = 0; i < segmentCount; i += 1) {
-    const j = (i + 1) % path.points.length;
+  for (let i = 0; i < segmentCount; i++) {
     const a = path.points[i];
-    const b = path.points[j];
-    const c1 = a.out ?? a.p;
-    const c2 = b.in ?? b.p;
-
-    let minD = Number.POSITIVE_INFINITY;
-    for (let s = 1; s <= 20; s += 1) {
-      const t = s / 20;
-      const p = sampleBezier(a.p, c1, c2, b.p, t);
-      minD = Math.min(minD, dist(pos, p));
+    const b = path.points[(i + 1) % path.points.length];
+    let t: number;
+    let position: Vec;
+    if (!a.out && !b.in) {
+      const dx = b.p.x - a.p.x;
+      const dy = b.p.y - a.p.y;
+      t = clamp(((pos.x - a.p.x) * dx + (pos.y - a.p.y) * dy) / (dx * dx + dy * dy || 1), 0, 1);
+      position = { x: a.p.x + t * dx, y: a.p.y + t * dy };
+    } else {
+      const at = (u: number) => sampleBezier(a.p, a.out ?? a.p, b.in ?? b.p, b.p, u);
+      let nearest = 0;
+      let distance = Infinity;
+      for (let j = 0; j <= 40; j++) {
+        const d = dist(pos, at(j / 40));
+        if (d < distance) { distance = d; nearest = j / 40; }
+      }
+      let lo = Math.max(0, nearest - 1 / 40);
+      let hi = Math.min(1, nearest + 1 / 40);
+      for (let j = 0; j < 24; j++) {
+        const left = lo + (hi - lo) / 3;
+        const right = hi - (hi - lo) / 3;
+        if (dist(pos, at(left)) < dist(pos, at(right))) hi = right;
+        else lo = left;
+      }
+      t = (lo + hi) / 2;
+      position = at(t);
     }
-
-    if (minD < best.distance) best = { segmentIndex: i, distance: minD };
+    const distance = dist(pos, position);
+    if (distance < best.distance) best = { segmentIndex: i, distance, t, position };
   }
-
   return best;
 };
+
+const splitPathSegment = (path: PathShape, segmentIndex: number, t: number): PathShape => {
+  const points = clonePoints(path.points);
+  const a = points[segmentIndex];
+  const b = points[(segmentIndex + 1) % points.length];
+  if (!a || !b) return path;
+  const lerp = (a: Vec, b: Vec): Vec => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  let inserted: Point;
+  if (!a.out && !b.in) {
+    inserted = { id: uid(), p: lerp(a.p, b.p), in: null, out: null };
+  } else {
+    const p1 = lerp(a.p, a.out ?? a.p);
+    const p2 = lerp(a.out ?? a.p, b.in ?? b.p);
+    const p3 = lerp(b.in ?? b.p, b.p);
+    const q1 = lerp(p1, p2);
+    const q2 = lerp(p2, p3);
+    inserted = { id: uid(), p: lerp(q1, q2), in: q1, out: q2 };
+    a.out = p1;
+    b.in = p3;
+  }
+  points.splice(segmentIndex + 1, 0, inserted);
+  return { ...path, points, sourceD: null, geometryDirty: true };
+};
+
+// Straight anchors expose provisional handles so dragging can introduce a curve.
+const editablePoint = (point: Point): Point => ({
+  ...point,
+  in: point.in ?? { x: point.p.x - 40, y: point.p.y },
+  out: point.out ?? { x: point.p.x + 40, y: point.p.y },
+});
 
 const getContainMap = (vb: ViewBox) => {
   const s = Math.min(width / vb.vbW, height / vb.vbH);
@@ -821,9 +874,9 @@ const translatePathD = (d: string, tx: number, ty: number): string => {
   return out.join(' ');
 };
 
-const serializeSvg = (shapes: PathShape[], vb: ViewBox) => {
+const serializeSvg = (shapes: PathShape[], vb: ViewBox, coordinateViewBox: ViewBox = vb) => {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-  const exportShapes = mapShapesToViewBox(shapes, vb);
+  const exportShapes = mapShapesToViewBox(shapes, coordinateViewBox);
   const renderShape = (shape: PathShape, exportShape: PathShape, indent: string) => {
     const commonAttrs: string[] = [];
     if (shape.svgId.trim()) commonAttrs.push(`id="${esc(shape.svgId.trim())}"`);
@@ -2041,6 +2094,8 @@ export {
   clonePoints,
   cloneShapes,
   closestSegment,
+  splitPathSegment,
+  editablePoint,
   createPresetPath,
   dist,
   extractSvgFromClipboard,

@@ -1274,3 +1274,39 @@ textarea {
 .code-overlay .tok-text {
   color: #c9ddf4;
 }
+
+.filled-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  border: 1px solid #566377;
+  border-radius: 3px;
+  background: linear-gradient(to right, #c47916 var(--slider-fill), #283342 var(--slider-fill));
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.filled-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 1px;
+  height: 22px;
+  background: transparent;
+}
+
+.filled-slider::-moz-range-thumb {
+  width: 1px;
+  height: 22px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.filled-slider:focus-visible { outline: 2px solid var(--accent-yellow); outline-offset: 2px; }
+.filled-slider:disabled { cursor: default; opacity: .5; }
+.viewbox-overlay { pointer-events: stroke; cursor: move; }
+.viewbox-handle { fill: #151b23; stroke: var(--accent-yellow); }
+.pen-add, .pen-preview { pointer-events: none; }
+.editor.pen .handle, .editor.pen .anchor { cursor: inherit; }

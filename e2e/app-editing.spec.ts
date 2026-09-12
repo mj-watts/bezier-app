@@ -49,9 +49,9 @@ test('core editing controls update UI and code', async ({ page }) => {
   await viewBoxBtn.click();
   await expect(page.locator('.viewbox-overlay')).toHaveCount(0);
 
-  await expect(zoomReadout).toHaveText('100%');
+  const startingZoom = Number.parseInt((await zoomReadout.textContent()) ?? '0', 10);
   await zoomInBtn.click();
-  await expect(zoomReadout).not.toHaveText('100%');
+  await expect.poll(async () => Number.parseInt((await zoomReadout.textContent()) ?? '0', 10)).toBeGreaterThan(startingZoom);
 });
 
 

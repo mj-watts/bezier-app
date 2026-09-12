@@ -1,9 +1,8 @@
-import { type Dispatch, type MouseEvent, type MutableRefObject, type PointerEvent, type SetStateAction } from 'react';
+import { type Dispatch, type MutableRefObject, type PointerEvent, type SetStateAction } from 'react';
 import {
   getPathBounds,
   height,
   pathData,
-  sampleBezier,
   type DragTarget,
   type PathShape,
   type PenHover,
@@ -15,6 +14,7 @@ import {
 import { type CursorZoomFocus, type MarqueeState, type TransformFrame } from '../../types/app-types';
 import AnchorsOverlay from './AnchorsOverlay';
 import TransformOverlay from './TransformOverlay';
+import ViewBoxOverlay from './ViewBoxOverlay';
 
 type Props = {
   editorSvgRef: MutableRefObject<SVGSVGElement | null>;
@@ -27,7 +27,11 @@ type Props = {
   onCanvasMove: (e: PointerEvent<SVGSVGElement>) => void;
   setCursorZoomFocus: Dispatch<SetStateAction<CursorZoomFocus | null>>;
   setPenHover: Dispatch<SetStateAction<PenHover>>;
-  onCanvasClick: (e: MouseEvent<SVGSVGElement>) => void;
+  onPenPointerDown: (e: PointerEvent<SVGSVGElement>) => void;
+  penCursor: string;
+  altDown: boolean;
+  penDraft: PathShape | null;
+  penPosition: Vec | null;
   clearSelection: () => void;
   toLocal: (clientX: number, clientY: number, target: SVGSVGElement) => Vec;
   marquee: MarqueeState | null;
@@ -74,7 +78,11 @@ const EditorCanvas = ({
   onCanvasMove,
   setCursorZoomFocus,
   setPenHover,
-  onCanvasClick,
+  onPenPointerDown,
+  penCursor,
+  altDown,
+  penDraft,
+  penPosition,
   clearSelection,
   toLocal,
   marquee,
@@ -131,9 +139,10 @@ const EditorCanvas = ({
             className={spaceDown ? 'editor pan' : tool === 'pen' ? 'editor pen' : tool === 'scale' ? 'editor scale' : 'editor'}
             tabIndex={0}
             viewBox={`${viewOrigin.x} ${viewOrigin.y} ${width / zoom} ${height / zoom}`}
-            style={{ color: currentColorValue }}
+            style={{ color: currentColorValue, cursor: spaceDown ? 'grab' : tool === 'pen' ? penCursor : undefined }}
+            onPointerDownCapture={onPenPointerDown}
             onPointerDown={(e) => {
-              e.currentTarget.focus();
+              e.currentTarget.focus({ preventScroll: true });
               if (!spaceDown) return;
               e.preventDefault();
               setDrag({
@@ -145,13 +154,25 @@ const EditorCanvas = ({
             }}
             onPointerMove={onCanvasMove}
             onPointerUp={() => setDrag(null)}
+            onPointerCancel={() => setDrag(null)}
             onPointerLeave={(e) => {
               setDrag(null);
               setCursorZoomFocus(null);
               if (tool === 'pen') setPenHover(null);
               e.currentTarget.style.cursor = '';
             }}
-            onClick={onCanvasClick}
+            onDoubleClickCapture={(e) => {
+              if (tool === 'pen' || spaceDown) return;
+              const pos = toLocal(e.clientX, e.clientY, e.currentTarget);
+              const point = new DOMPoint(pos.x, pos.y);
+              const paths = Array.from(e.currentTarget.querySelectorAll<SVGPathElement>('[data-shape-index]')).reverse();
+              const hit = paths.find((path) =>
+                (path.getAttribute('fill') !== 'none' && path.isPointInFill(point)) || path.isPointInStroke(point));
+              if (hit) {
+                e.stopPropagation();
+                onPathDoubleClick(Number(hit.dataset.shapeIndex));
+              }
+            }}
           >
             <defs>
               <pattern id="grid-small" width="24" height="24" patternUnits="userSpaceOnUse">
@@ -230,6 +251,7 @@ const EditorCanvas = ({
             {shapes.map((shape, i) => (
               <path
                 key={shape.id}
+                data-shape-index={i}
                 d={pathDs[i]}
                 clipPath={(() => {
                   const ref = shape.clipPathRef.trim();
@@ -319,6 +341,7 @@ const EditorCanvas = ({
               selectedPoint={selectedPoint}
               worldUnitsPerPx={worldUnitsPerPx}
               penHover={penHover}
+              altDown={altDown}
               spaceDown={spaceDown}
               pushUndo={pushUndo}
               toLocal={toLocal}
@@ -329,32 +352,13 @@ const EditorCanvas = ({
             />
 
             {tool === 'pen' && penHover?.kind === 'segment' ? (
-              <rect
-                x={
-                  sampleBezier(
-                    activePath.points[penHover.segmentIndex].p,
-                    activePath.points[penHover.segmentIndex].out ?? activePath.points[penHover.segmentIndex].p,
-                    activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].in ??
-                      activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].p,
-                    activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].p,
-                    0.5,
-                  ).x - 3 * worldUnitsPerPx
-                }
-                y={
-                  sampleBezier(
-                    activePath.points[penHover.segmentIndex].p,
-                    activePath.points[penHover.segmentIndex].out ?? activePath.points[penHover.segmentIndex].p,
-                    activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].in ??
-                      activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].p,
-                    activePath.points[(penHover.segmentIndex + 1) % activePath.points.length].p,
-                    0.5,
-                  ).y - 3 * worldUnitsPerPx
-                }
-                width={6 * worldUnitsPerPx}
-                height={6 * worldUnitsPerPx}
-                className="pen-add"
-                vectorEffect="non-scaling-stroke"
-              />
+              <rect x={penHover.position.x - 3 * worldUnitsPerPx} y={penHover.position.y - 3 * worldUnitsPerPx}
+                width={6 * worldUnitsPerPx} height={6 * worldUnitsPerPx} className="pen-add" vectorEffect="non-scaling-stroke" />
+            ) : null}
+            {tool === 'pen' && penDraft && penPosition && penDraft.points.length > 0 ? (
+              <line className="pen-preview" x1={penDraft.points[penDraft.points.length - 1].p.x}
+                y1={penDraft.points[penDraft.points.length - 1].p.y} x2={penPosition.x} y2={penPosition.y}
+                stroke="#7ab9ff" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
             ) : null}
 
             {marquee ? (
@@ -373,50 +377,8 @@ const EditorCanvas = ({
               />
             ) : null}
 
-            {showViewBox
-              ? (() => {
-                  const sizeLabel = `${docViewBox.vbW.toFixed(1)} x ${docViewBox.vbH.toFixed(1)}`;
-                  const sizeTagScale = 0.6;
-                  const labelFontSize = (9 * sizeTagScale) / zoom;
-                  const labelWidth = ((sizeLabel.length * 5.5 + 8) * sizeTagScale) / zoom;
-                  const labelHeight = (14 * sizeTagScale) / zoom;
-                  const labelCx = editorDocViewBox.minX + editorDocViewBox.vbW / 2;
-                  const labelCy = editorDocViewBox.minY + editorDocViewBox.vbH + (5 * sizeTagScale) / zoom + labelHeight / 2;
-                  return (
-                    <g className="viewbox-top-layer" pointerEvents="none">
-                      <rect
-                        x={editorDocViewBox.minX}
-                        y={editorDocViewBox.minY}
-                        width={editorDocViewBox.vbW}
-                        height={editorDocViewBox.vbH}
-                        className="viewbox-overlay"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      <g className="scale-size-tag">
-                        <rect
-                          x={labelCx - labelWidth / 2}
-                          y={labelCy - labelHeight / 2}
-                          width={labelWidth}
-                          height={labelHeight}
-                          rx={(3 * sizeTagScale) / zoom}
-                          ry={(3 * sizeTagScale) / zoom}
-                          className="scale-size-tag-box viewbox-size-tag-box"
-                        />
-                        <text
-                          x={labelCx}
-                          y={labelCy}
-                          className="scale-size-tag-text viewbox-size-tag-text"
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          style={{ fontSize: `${labelFontSize}px` }}
-                        >
-                          {sizeLabel}
-                        </text>
-                      </g>
-                    </g>
-                  );
-                })()
-              : null}
+            {showViewBox ? <ViewBoxOverlay frame={editorDocViewBox} viewBox={docViewBox} unitsPerPx={worldUnitsPerPx}
+              spaceDown={spaceDown} toLocal={toLocal} pushUndo={pushUndo} setDrag={setDrag} /> : null}
           </svg>
     </>
   );

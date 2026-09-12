@@ -1,4 +1,4 @@
-import { Circle, Diamond, Square, Triangle } from 'lucide-react';
+import { Circle, Cross, Diamond, Moon, Square, Star, Triangle } from 'lucide-react';
 import { type RefObject } from 'react';
 import { type ShapePreset } from '../../lib/editor-core';
 import { type ShapeMenuState } from '../../types/app-types';
@@ -31,6 +31,9 @@ const ShapeMenu = ({ menu, menuRef, onAddPreset }: Props) => {
       <button className="shape-preset-btn" title="Triangle" onClick={() => onAddPreset('triangle')}>
         <Triangle />
       </button>
+      <button className="shape-preset-btn" title="Cross" onClick={() => onAddPreset('cross')}><Cross /></button>
+      <button className="shape-preset-btn" title="Moon" onClick={() => onAddPreset('moon')}><Moon /></button>
+      <button className="shape-preset-btn" title="Star" onClick={() => onAddPreset('star')}><Star /></button>
     </div>
   );
 };
