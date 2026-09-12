@@ -19,3 +19,10 @@ describe('basic shape presets', () => {
     expect(circle.points.every((point) => point.in !== null && point.out !== null)).toBe(true);
   });
 });
+
+it.each([['cross', 12], ['star', 10], ['moon', 4]] as const)('%s is a distinct closed preset', (preset, points) => {
+  const shape = createPresetPath(preset, preset, 200, 200);
+  expect(shape.closed).toBe(true);
+  expect(shape.points).toHaveLength(points);
+  expect(shape.points.some((point) => point.in || point.out)).toBe(preset === 'moon');
+});
