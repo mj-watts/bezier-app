@@ -1527,17 +1527,16 @@ const App = () => {
 
   const clearDocument = () => {
     pushUndo();
-    const defaults = cloneShapes(DEFAULT_DOCUMENT.shapes);
-    setShapes(defaults);
+    setShapes([]);
     setSelectedPath(0);
-    setSelectedPaths([0]);
-    setPathSelected(true);
+    setSelectedPaths([]);
+    setPathSelected(false);
     setSelectedPoint(0);
-    setSelectedPoints([0]);
+    setSelectedPoints([]);
     setTransformAllPaths(false);
     setDocViewBox(DEFAULT_DOCUMENT.viewBox);
     setZoom(DEFAULT_ZOOM);
-    setViewOrigin(getCenteredOriginForShapes(defaults, DEFAULT_ZOOM));
+    setViewOrigin(getCenteredOriginForShapes([], DEFAULT_ZOOM));
     setCodeError('');
     setTool('select');
     setPenHover(null);
